@@ -1,0 +1,145 @@
+@use './variables.scss';
+@use './mixin.scss';
+@use './transition.scss';
+@use './element-ui.scss';
+@use './sidebar.scss';
+
+body {
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-family: Helvetica Neue, Helvetica, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Arial, sans-serif;
+  margin: 0;
+}
+
+html {
+  box-sizing: border-box;
+}
+
+*,
+*:before,
+*:after {
+  box-sizing: inherit;
+}
+
+div:focus{
+  outline: none;
+}
+
+a:focus,
+a:active {
+  outline: none;
+}
+
+a,
+a:focus,
+a:hover {
+  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+}
+
+.clearfix {
+  &:after {
+    visibility: hidden;
+    display: block;
+    font-size: 0;
+    content: " ";
+    clear: both;
+    height: 0;
+  }
+}
+
+//main-container全局样式
+.app-main{
+  min-height: 100%
+}
+
+.app-container {
+  padding: 20px;
+}
+
+/* flex布局 */
+.flex_box {
+	display: -webkit-flex;
+	display: flex;
+	align-items: center;
+}
+
+.flex_row_between {
+	justify-content: space-between;
+}
+
+.flex_row_center {
+	justify-content: center;
+}
+
+.flex_row_around {
+	justify-content: space-around;
+}
+
+.flex_row_end {
+	justify-content: flex-end;
+}
+
+.flex_col {
+	flex-direction: column;
+}
+
+.flex_col_top {
+	align-items: flex-start;
+}
+
+.flex_col_bottom {
+	align-items: flex-end;
+}
+
+.flex_wrap {
+	flex-wrap: wrap;
+}
+
+.flex_shrink {
+	flex-shrink: 0;
+}
+/* 文字溢出隐藏 */
+.text_hidden {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.text_more {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.text_three {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+::-webkit-scrollbar {
+  width: 6px; /* 设置滚动条的宽度 */
+  height: 6px;
+}
+/* 滚动条滑块样式 */
+::-webkit-scrollbar-thumb {
+  background-color: #b5b5b5; /* 设置滑块背景颜色 */
+}
+/* 滚动条轨道hover状态样式 */
+::-webkit-scrollbar-track:hover {
+  background-color: #efefef; /* 设置轨道hover状态时的背景颜色 */
+}
+/* 滚动条滑块hover状态样式 */
+::-webkit-scrollbar-thumb:hover {
+  background-color: #b5b5b5; /* 设置滑块hover状态时的背景颜色 */
+}
+.el-select-dropdown__item {
+  font-size: 16px;
+  height: 40px;
+  line-height: 40px;
+}
