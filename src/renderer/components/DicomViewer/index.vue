@@ -126,7 +126,6 @@ export default {
     }
   },
   mounted() {
-    console.log('DicomViewer mounted，开始初始化...');
     this.initializeViewer();
     this.setupKeyboardShortcuts();
     // 自动加载PATS目录
@@ -165,18 +164,17 @@ export default {
      */
     initializeViewer() {
       try {
-        console.log('initializeViewer方法被调用');
-        console.log('this.$refs.dicomViewer:', this.$refs.dicomViewer);
-        console.log('初始化DICOM查看器');
+        // console.log('initializeViewer方法被调用');
+        // console.log('this.$refs.dicomViewer:', this.$refs.dicomViewer);
+        // console.log('初始化DICOM查看器');
         ipcRenderer.send('maximize-window');
         
         // 使用改进后的服务类
-        console.log('准备调用cornerstoneService.enableElement...');
+        // console.log('准备调用cornerstoneService.enableElement...');
         cornerstoneService.enableElement(this.$refs.dicomViewer);
-        console.log('DICOM查看器初始化完成');
+        // console.log('DICOM查看器初始化完成');
       } catch (error) {
-        console.error('初始化查看器失败', error);
-        console.error('错误详情:', error);
+        // console.error('初始化查看器失败', error);
       }
     },
 
@@ -190,22 +188,22 @@ export default {
           try {
             const path = require('path');
             const patsPath = path.join(process.cwd(), 'PATS');
-            console.log('自动加载PATS目录:', patsPath);
+            // console.log('自动加载PATS目录:', patsPath);
             
             // 检查PATS目录是否存在
             const fs = require('fs');
             if (fs.existsSync(patsPath)) {
               await this.loadDicomDirectory(patsPath);
-              console.log('PATS目录加载成功');
+              // console.log('PATS目录加载成功');
             } else {
-              console.log('PATS目录不存在，跳过自动加载');
+              // console.log('PATS目录不存在，跳过自动加载');
             }
           } catch (error) {
-            console.error('自动加载PATS目录失败:', error);
+            // console.error('自动加载PATS目录失败:', error);
           }
         }, 2000); // 延迟2秒
       } catch (error) {
-        console.error('自动加载PATS目录初始化失败:', error);
+        // console.error('自动加载PATS目录初始化失败:', error);
       }
     },
 
@@ -229,10 +227,10 @@ export default {
         // 清理Cornerstone元素
         cornerstoneService.disableElement(this.$refs.dicomViewer);
         
-        console.log('查看器清理完成');
+        // console.log('查看器清理完成');
       } catch (error) {
-        console.error('清理查看器失败', error);
-        console.error('清理查看器失败:', error);
+        // console.error('清理查看器失败', error);
+        // console.error('清理查看器失败:', error);
       }
     },
 
@@ -258,11 +256,11 @@ export default {
           const stats = fs.statSync(selectedPath);
           if (stats.isFile()) {
             // 选择的是单个文件
-            console.log(`选择单个DICOM文件: ${selectedPath}`);
+            // console.log(`选择单个DICOM文件: ${selectedPath}`);
             await this.loadDicomFile(selectedPath);
           } else {
             // 选择的是目录
-            console.log(`选择DICOM目录: ${selectedPath}`);
+            // console.log(`选择DICOM目录: ${selectedPath}`);
             await this.loadDicomDirectory(selectedPath);
           }
           
@@ -287,7 +285,7 @@ export default {
         });
         
         if (result.filePaths[0]) {
-          console.log(`选择单个DICOM文件: ${result.filePaths[0]}`);
+          // console.log(`选择单个DICOM文件: ${result.filePaths[0]}`);
           await this.loadDicomFile(result.filePaths[0]);
           await this.loadFirstImage();
         }
@@ -334,13 +332,13 @@ export default {
      */
     async loadCurrentImage() {
       try {
-        console.log('loadCurrentImage被调用');
+        // console.log('loadCurrentImage被调用');
         
         const currentSeries = this.$store.getters['dicom/currentSeries'];
-        console.log('当前系列:', currentSeries);
+        // console.log('当前系列:', currentSeries);
         
         if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
-          console.log('没有可用的系列或图像');
+          // console.log('没有可用的系列或图像');
           return;
         }
 
@@ -350,7 +348,7 @@ export default {
         // 递归查找系列中的所有DICOM文件
         const imageIds = [];
         const findDicomFiles = (node) => {
-          console.log(`检查节点: ${node.name}, isFile: ${node.isFile}, 路径: ${node.path}`);
+          // console.log(`检查节点: ${node.name}, isFile: ${node.isFile}, 路径: ${node.path}`);
           
           if (node.isFile && node.path) {
             // 检查是否为DICOM文件（包括无扩展名的情况）
@@ -363,7 +361,7 @@ export default {
             
             if (isDicomFile) {
               imageIds.push(`wadouri:${node.path}`);
-              console.log(`找到DICOM文件: ${node.name} -> wadouri:${node.path}`);
+              // console.log(`找到DICOM文件: ${node.name} -> wadouri:${node.path}`);
             }
           } else if (node.children) {
             node.children.forEach(child => findDicomFiles(child));
@@ -371,10 +369,10 @@ export default {
         };
         
         findDicomFiles(currentSeries);
-        console.log('生成的imageIds:', imageIds);
+        // console.log('生成的imageIds:', imageIds);
         
         if (imageIds.length === 0) {
-          console.log('没有找到DICOM图像文件');
+          // console.log('没有找到DICOM图像文件');
           return;
         }
         
@@ -388,7 +386,7 @@ export default {
         
         // 加载第一个图像
         const firstImageId = imageIds[0];
-        console.log('加载第一个图像:', firstImageId);
+        // console.log('加载第一个图像:', firstImageId);
         
         const image = await this.$cornerstone.loadImage(firstImageId);
         this.$cornerstone.displayImage(element, image);
@@ -402,10 +400,9 @@ export default {
         this.$cornerstoneTools.addTool(StackScrollMouseWheelTool);
         this.$cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
         
-        console.log('图像加载成功');
+        // console.log('图像加载成功');
       } catch (error) {
-        console.error('loadCurrentImage失败:', error);
-        console.error('错误详情:', error);
+        // console.error('loadCurrentImage失败:', error);
       }
     },
 
@@ -414,7 +411,7 @@ export default {
      */
     async activateTool({ toolName, actionId }) {
       try {
-        console.log('activateTool被调用:', { toolName, actionId });
+        // console.log('activateTool被调用:', { toolName, actionId });
         
         if (this.activeAction === actionId) {
           return;
@@ -469,17 +466,17 @@ export default {
             this.$cornerstoneTools.setToolActive('RectangleRoi', { mouseButtonMask: 1 });
             break;
           default:
-            console.log('未知的工具ID:', actionId);
+            // console.log('未知的工具ID:', actionId);
         }
       } catch (error) {
-        console.error('activateTool失败:', error);
+        // console.error('activateTool失败:', error);
         errorHandler.handleError(error, 'activateTool');
       }
     },
 
     async resetViewport() {
       try {
-        console.log('resetViewport被调用');
+        // console.log('resetViewport被调用');
         const element = this.$refs.dicomViewer;
         
         // 基于dashboard的成功模式
@@ -503,16 +500,16 @@ export default {
         // 刷新视图
         this.$cornerstone.updateImage(element);
         
-        console.log('视口重置完成');
+        // console.log('视口重置完成');
       } catch (error) {
-        console.error('resetViewport失败:', error);
+        // console.error('resetViewport失败:', error);
         errorHandler.handleError(error, 'resetViewport');
       }
     },
 
     async rotateImage(degrees = 90) {
       try {
-        console.log('rotateImage被调用:', degrees);
+        // console.log('rotateImage被调用:', degrees);
         const element = this.$refs.dicomViewer;
         
         const viewport = this.$cornerstone.getViewport(element);
@@ -520,16 +517,16 @@ export default {
         this.$cornerstone.setViewport(element, viewport);
         this.$cornerstone.updateImage(element);
         
-        console.log('图像旋转完成');
+        // console.log('图像旋转完成');
       } catch (error) {
-        console.error('rotateImage失败:', error);
+        // console.error('rotateImage失败:', error);
         errorHandler.handleError(error, 'rotateImage');
       }
     },
 
     async flipImage(direction) {
       try {
-        console.log('flipImage被调用:', direction);
+        // console.log('flipImage被调用:', direction);
         const element = this.$refs.dicomViewer;
         
         const viewport = this.$cornerstone.getViewport(element);
@@ -541,31 +538,31 @@ export default {
         this.$cornerstone.setViewport(element, viewport);
         this.$cornerstone.updateImage(element);
         
-        console.log('图像翻转完成');
+        // console.log('图像翻转完成');
       } catch (error) {
-        console.error('flipImage失败:', error);
+        // console.error('flipImage失败:', error);
         errorHandler.handleError(error, 'flipImage');
       }
     },
 
     async fitToWindow() {
       try {
-        console.log('fitToWindow被调用');
+        // console.log('fitToWindow被调用');
         const element = this.$refs.dicomViewer;
         
         this.$cornerstone.fitToWindow(element);
         this.$cornerstone.updateImage(element);
         
-        console.log('适应窗口完成');
+        // console.log('适应窗口完成');
       } catch (error) {
-        console.error('fitToWindow失败:', error);
+        // console.error('fitToWindow失败:', error);
         errorHandler.handleError(error, 'fitToWindow');
       }
     },
 
     async invertImage() {
       try {
-        console.log('invertImage被调用');
+        // console.log('invertImage被调用');
         const element = this.$refs.dicomViewer;
         
         const viewport = this.$cornerstone.getViewport(element);
@@ -573,16 +570,16 @@ export default {
         this.$cornerstone.setViewport(element, viewport);
         this.$cornerstone.updateImage(element);
         
-        console.log('图像反转完成');
+        // console.log('图像反转完成');
       } catch (error) {
-        console.error('invertImage失败:', error);
+        // console.error('invertImage失败:', error);
         errorHandler.handleError(error, 'invertImage');
       }
     },
 
     async setWindowLevel(index) {
       try {
-        console.log('setWindowLevel被调用:', index);
+        // console.log('setWindowLevel被调用:', index);
         const element = this.$refs.dicomViewer;
         
         if (this.cwImgs[index]) {
@@ -592,26 +589,26 @@ export default {
           viewport.voi.windowCenter = preset.wc;
           this.$cornerstone.setViewport(element, viewport);
           this.$cornerstone.updateImage(element);
-          console.log('窗宽窗位设置完成:', preset);
+          // console.log('窗宽窗位设置完成:', preset);
         }
       } catch (error) {
-        console.error('setWindowLevel失败:', error);
+        // console.error('setWindowLevel失败:', error);
         errorHandler.handleError(error, 'setWindowLevel');
       }
     },
 
     async clearMeasurements() {
       try {
-        console.log('clearMeasurements被调用');
+        // console.log('clearMeasurements被调用');
         const element = this.$refs.dicomViewer;
         
         const toolStateManager = this.$cornerstoneTools.globalImageIdSpecificToolStateManager;
         toolStateManager.restoreToolState({});
         this.$cornerstone.updateImage(element);
         
-        console.log('测量清除完成');
+        // console.log('测量清除完成');
       } catch (error) {
-        console.error('clearMeasurements失败:', error);
+        // console.error('clearMeasurements失败:', error);
         errorHandler.handleError(error, 'clearMeasurements');
       }
     },
@@ -620,14 +617,14 @@ export default {
      * 显示图像信息
      */
     showImageInfo() {
-      console.log('showImageInfo被调用');
+      // console.log('showImageInfo被调用');
       try {
         // 调用ImageInfo组件的show方法，传递当前活动的系列索引
         const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex || 0;
         this.$refs.imageInfo.show(activeSeriesIndex);
-        console.log('图像信息对话框已打开');
+        // console.log('图像信息对话框已打开');
       } catch (error) {
-        console.error('显示图像信息失败:', error);
+        // console.error('显示图像信息失败:', error);
         this.$message.error('显示图像信息失败');
       }
     },
@@ -704,7 +701,7 @@ export default {
         // 重新加载当前图像到单视图模式
         await this.loadCurrentImage();
         
-        console.log('网格布局已关闭');
+        // console.log('网格布局已关闭');
       } catch (error) {
         errorHandler.handleError(error, 'deactivateGridLayout');
       }
@@ -725,8 +722,8 @@ export default {
         const element = this.$refs.dicomViewer;
         const layout = this.$store.state.viewer.gridViewState.layout;
         
-        console.log('初始化网格视图，布局:', layout);
-        console.log('可用系列数量:', this.$store.state.dicom.dicomSeries.length);
+        // console.log('初始化网格视图，布局:', layout);
+        // console.log('可用系列数量:', this.$store.state.dicom.dicomSeries.length);
         
         // 应用网格样式
         this.applyGridStyles(element, layout);
@@ -734,7 +731,7 @@ export default {
         // 加载多个系列到网格中
         await this.loadMultipleSeriesToGrid(layout);
         
-        console.log('网格视图初始化完成');
+        // console.log('网格视图初始化完成');
       } catch (error) {
         errorHandler.handleError(error, 'initializeGridView');
       }
@@ -797,7 +794,7 @@ export default {
         const totalSlots = rows * cols;
         const availableSeries = this.$store.state.dicom.dicomSeries;
         
-        console.log(`加载 ${Math.min(totalSlots, availableSeries.length)} 个系列到网格`);
+        // console.log(`加载 ${Math.min(totalSlots, availableSeries.length)} 个系列到网格`);
         
         // 为每个视口加载对应的系列
         for (let i = 0; i < Math.min(totalSlots, availableSeries.length); i++) {
@@ -809,7 +806,7 @@ export default {
             const firstImage = series.children[0];
             const imageId = `wadouri:${firstImage.path}`;
             
-            console.log(`加载系列 ${i} 到视口 ${i}:`, series.name);
+            // console.log(`加载系列 ${i} 到视口 ${i}:`, series.name);
             
             // 启用Cornerstone元素
             this.$cornerstone.enable(viewport);
@@ -823,7 +820,7 @@ export default {
               this.addSeriesInfoLabel(viewport, series, i);
               
             } catch (error) {
-              console.error(`加载系列 ${i} 失败:`, error);
+              // console.error(`加载系列 ${i} 失败:`, error);
             }
           }
         }
@@ -834,7 +831,7 @@ export default {
         }
         
       } catch (error) {
-        console.error('加载多个系列到网格失败:', error);
+        // console.error('加载多个系列到网格失败:', error);
       }
     },
 
@@ -876,7 +873,7 @@ export default {
         const availableSeries = this.$store.state.dicom.dicomSeries;
         if (viewportIndex < availableSeries.length) {
           this.$store.dispatch('dicom/selectDicomSeries', viewportIndex);
-          console.log(`选中视口 ${viewportIndex}，对应系列: ${availableSeries[viewportIndex].name}`);
+          // console.log(`选中视口 ${viewportIndex}，对应系列: ${availableSeries[viewportIndex].name}`);
         }
       }
     },

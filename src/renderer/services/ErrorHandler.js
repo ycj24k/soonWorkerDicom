@@ -70,7 +70,7 @@ export class ErrorHandler {
       this.showErrorNotification(appError);
     }
     
-    console.error(`[${context}] 错误:`, appError);
+    // console.error(`[${context}] 错误:`, appError);
     return appError;
   }
 
@@ -78,7 +78,7 @@ export class ErrorHandler {
    * 处理成功消息
    */
   handleSuccess(message, context = '') {
-    console.log(`[${context}] 成功:`, message);
+    // console.log(`[${context}] 成功:`, message);
     
     Notification({
       title: '成功',
@@ -239,7 +239,7 @@ export class ErrorHandler {
         type: 'error'
       });
     } catch (error) {
-      console.error('显示错误对话框失败:', error);
+      // console.error('显示错误对话框失败:', error);
     }
   }
 

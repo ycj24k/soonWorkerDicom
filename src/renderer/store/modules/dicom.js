@@ -101,26 +101,17 @@ const actions = {
       
       // 智能分析DICOM结构
       const structureAnalysis = dicomService.analyzeDicomStructure(directoryTree);
-      console.log('DICOM结构分析结果:', structureAnalysis);
-      console.log('seriesNodes数量:', structureAnalysis ? structureAnalysis.seriesNodes.length : 'structureAnalysis为null');
-      console.log('imageNodes数量:', structureAnalysis ? structureAnalysis.imageNodes.length : 'structureAnalysis为null');
       
       if (!structureAnalysis) {
-        console.error('DICOM结构分析失败: structureAnalysis为null');
         throw new Error('DICOM目录结构分析失败');
       }
       
       if (structureAnalysis.seriesNodes.length === 0 && structureAnalysis.imageNodes.length === 0) {
-        console.error('未找到任何DICOM文件:', {
-          seriesNodes: structureAnalysis.seriesNodes,
-          imageNodes: structureAnalysis.imageNodes
-        });
         throw new Error('未找到任何有效的DICOM文件');
       }
       
       // 如果有图像但没有序列，创建默认序列
       if (structureAnalysis.seriesNodes.length === 0 && structureAnalysis.imageNodes.length > 0) {
-        console.log('找到DICOM图像但无序列，创建默认序列');
         structureAnalysis.seriesNodes = [{
           name: '默认序列',
           path: directory,
@@ -129,21 +120,12 @@ const actions = {
         }];
       }
 
-      console.log('DICOM结构分析结果:', {
-        structureType: structureAnalysis.structureType,
-        maxDepth: structureAnalysis.maxDepth,
-        seriesCount: structureAnalysis.seriesNodes.length,
-        imageCount: structureAnalysis.imageNodes.length
-      });
 
       // 直接使用结构分析结果设置系列数据
-      console.log('设置DICOM系列数据:', structureAnalysis.seriesNodes);
       commit('SET_DICOM_SERIES', structureAnalysis.seriesNodes);
       
       // 生成缩略图
-      console.log('开始生成缩略图...');
       const { thumbnails, dicomDict } = await dicomService.generateThumbnailList(structureAnalysis.seriesNodes);
-      console.log('缩略图生成完成:', { thumbnailsCount: thumbnails.length, dicomDictKeys: Object.keys(dicomDict).length });
       commit('SET_THUMBNAILS', thumbnails);
       commit('SET_DICOM_DICT', dicomDict);
 
@@ -151,18 +133,11 @@ const actions = {
       const treeData = await dicomService.buildTree([directoryTree]);
       commit('SET_DIRECTORY_TREE', treeData);
 
-      console.log('DICOM目录加载完成:', {
-        directory,
-        seriesCount: structureAnalysis.seriesNodes.length,
-        imageCount: structureAnalysis.imageNodes.length,
-        thumbnailCount: thumbnails.length
-      });
 
       errorHandler.handleSuccess(`DICOM目录加载完成: ${directory}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载DICOM目录失败';
       commit('SET_ERROR', errorMessage);
-      console.error('DICOM目录加载失败:', error);
       // 不调用errorHandler.handleError，避免误报DICOM解析错误
     } finally {
       commit('SET_LOADING', false);
@@ -200,12 +175,6 @@ const actions = {
         throw new Error('DICOM文件格式无效');
       }
 
-      console.log('单文件DICOM结构分析结果:', {
-        structureType: structureAnalysis.structureType,
-        maxDepth: structureAnalysis.maxDepth,
-        seriesCount: structureAnalysis.seriesNodes.length,
-        imageCount: structureAnalysis.imageNodes.length
-      });
 
       // 创建单序列结构
       const singleSeries = {
@@ -230,16 +199,11 @@ const actions = {
       const treeData = await dicomService.buildTree([directoryTree]);
       commit('SET_DIRECTORY_TREE', treeData);
 
-      console.log('单文件DICOM加载完成:', {
-        fileName,
-        thumbnailCount: thumbnails.length
-      });
 
       errorHandler.handleSuccess(`DICOM文件加载完成: ${fileName}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载DICOM文件失败';
       commit('SET_ERROR', errorMessage);
-      console.error('DICOM文件加载失败:', error);
       // 不调用errorHandler.handleError，避免误报DICOM解析错误
     } finally {
       commit('SET_LOADING', false);
@@ -256,10 +220,8 @@ const actions = {
     const dicomDict = state.dicomDict;
     if (dicomDict && dicomDict[index] && dicomDict[index].imageIds) {
       const imageIds = dicomDict[index].imageIds;
-      console.log(`选择系列 ${index}，找到 ${imageIds.length} 个图像`);
       commit('SET_CURRENT_IMAGE_IDS', imageIds);
     } else {
-      console.log(`系列 ${index} 没有找到imageId列表`);
     }
   },
 
@@ -309,12 +271,10 @@ const getters = {
   currentImageIds: (state) => {
     const currentSeries = state.dicomSeries[state.activeSeriesIndex];
     if (currentSeries && currentSeries.children) {
-      console.log(`Vuex: 查找系列 ${currentSeries.name} 的图像，子节点数量: ${currentSeries.children.length}`);
       
       // 递归查找系列中的所有DICOM文件
       const imageIds = [];
       const findDicomFiles = (node) => {
-        console.log(`Vuex: 检查节点: ${node.name}, isFile: ${node.isFile}, 路径: ${node.path}`);
         
         if (node.isFile && node.path) {
           // 检查是否为DICOM文件（包括无扩展名的情况）
@@ -328,7 +288,6 @@ const getters = {
           if (isDicomFile) {
             const imageId = `wadouri:${node.path}`;
             imageIds.push(imageId);
-            console.log(`Vuex: 找到DICOM影像文件: ${node.name} -> ${imageId}`);
           }
         } else if (node.children) {
           node.children.forEach(child => findDicomFiles(child));
@@ -337,10 +296,8 @@ const getters = {
       
       findDicomFiles(currentSeries);
       
-      console.log(`Vuex: 系列 ${currentSeries.name} 找到 ${imageIds.length} 个DICOM影像文件`);
       return imageIds;
     }
-    console.log(`Vuex: 没有当前系列或系列没有子节点`);
     return [];
   },
 

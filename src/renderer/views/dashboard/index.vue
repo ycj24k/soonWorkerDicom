@@ -410,7 +410,6 @@ async function generateThumbnailList(dicomFileList, targetWidth = 1024) {
       dicomDict.push(result)
       thumbnails.push(thumbnail)
     } catch (error) {
-      console.error("Error processing DICOM file:", error);
     }
   }
 
@@ -489,33 +488,82 @@ function getLastTwoLayers(tree) {
   return result;
 }
 
-// 构建结构树
+// 构建结构树 - 支持动态目录结构
 async function buildTree(tree, max) {
   let num = 0
   let dicomDict = []
   dicomDict = await getItem('dicomDict')
-  tree.forEach((node1, index1) => {
-    node1.label = `ID:${dicomDict[num].find(item => item.tag === '00100020').value}/Name:${dicomDict[num].find(item => item.tag === '00100010').value}`
-    node1.id = `${index1 + 1}`
-    node1.children.forEach((node2, index2) => {
-      node2.label = `${dicomDict[num].find(item => item.tag === '00080020').value}: ${dicomDict[num].find(item => item.tag === '00080060').value} :${dicomDict[num].find(item => item.tag === '00081030').value}`
-      node2.id = `${node1.id}-${index2 + 1}`
-      node2.children.forEach((node3, index3) => {
-        if (dicomDict[num]) {
-          node3.label = `${dicomDict[num].find(item => item.tag === '00200011').value}:${dicomDict[num].find(item => item.tag === '0008103e').value}`
+  
+  // 递归构建树节点标签
+  function buildNodeLabels(node, parentId = '', depth = 0) {
+    node.id = parentId ? `${parentId}-${num++}` : `${num++}`;
+    
+    // 根据深度和DICOM字典设置标签
+    if (depth === 0) {
+      // 根节点（患者层）
+      if (dicomDict[num] && Array.isArray(dicomDict[num])) {
+        const patientId = dicomDict[num].find(item => item.tag === '00100020');
+        const patientName = dicomDict[num].find(item => item.tag === '00100010');
+        if (patientId && patientName) {
+          node.label = `ID:${patientId.value}/Name:${patientName.value}`;
         } else {
-          node3.label = node3.name
+          node.label = node.name;
         }
-        node3.id = `${node1.id}-${node2.id}-${index3 + 1}`
-        num++
-        node3.children.forEach((node4, index4) => {
-          node4.label = node4.name
-          node4.id = `${node1.id}-${node2.id}-${node3.id}-${index4 + 1}`
-        })
-      })
-    })
-  })
-  return tree
+      } else {
+        node.label = node.name;
+      }
+    } else if (depth === 1) {
+      // 研究层
+      if (dicomDict[num] && Array.isArray(dicomDict[num])) {
+        const studyDate = dicomDict[num].find(item => item.tag === '00080020');
+        const modality = dicomDict[num].find(item => item.tag === '00080060');
+        const studyDescription = dicomDict[num].find(item => item.tag === '00081030');
+        if (studyDate && modality && studyDescription) {
+          node.label = `${studyDate.value}: ${modality.value} :${studyDescription.value}`;
+        } else {
+          node.label = node.name;
+        }
+      } else {
+        node.label = node.name;
+      }
+    } else if (depth === 2) {
+      // 系列层
+      if (dicomDict[num] && Array.isArray(dicomDict[num])) {
+        const seriesNumber = dicomDict[num].find(item => item.tag === '00200011');
+        const seriesDescription = dicomDict[num].find(item => item.tag === '0008103e');
+        if (seriesNumber && seriesDescription) {
+          node.label = `${seriesNumber.value}:${seriesDescription.value}`;
+        } else {
+          node.label = node.name;
+        }
+      } else {
+        node.label = node.name;
+      }
+      num++; // 只有系列层才增加计数器
+    } else {
+      // 图像层或其他
+      node.label = node.name;
+    }
+
+    // 递归处理子节点
+    if (node.children && Array.isArray(node.children)) {
+      node.children.forEach((child, index) => {
+        buildNodeLabels(child, node.id, depth + 1);
+      });
+    }
+  }
+  
+  // 处理树数组
+  if (Array.isArray(tree)) {
+    tree.forEach((node, index) => {
+      buildNodeLabels(node, `${index}`, 0);
+    });
+  } else {
+    // 处理单个节点
+    buildNodeLabels(tree, '0', 0);
+  }
+  
+  return tree;
 }
 
 const exePath = !app.isPackaged ? process.cwd() : path.dirname(process.execPath)
@@ -526,12 +574,8 @@ export default {
   },
   data() {
     return {
-      dataTree: [
-        {
-          path: 'PAT00001',
-          chidren: []
-        }
-      ],
+      dataTree: [], // 默认设置为空，让用户选择DICOM目录
+      defaultDirectory: 'DICOM/100MB', // 默认目录
       infoTree: [
         {
           name: 'ID:00100020/Name:00100010',
@@ -590,6 +634,17 @@ export default {
     that.$cornerstone.enable(that.$refs.dicomViewer) // 启用元素
     that.addTools()
     that.getTemplates()
+    
+    // 默认加载100MB目录进行调试
+    console.log('设置自动加载定时器，默认目录:', that.defaultDirectory);
+    setTimeout(() => {
+      console.log('=== 开始默认加载100MB目录进行调试 ===');
+      that.targetDirectory = that.defaultDirectory;
+      console.log('设置目标目录:', that.targetDirectory);
+      that.$store.dispatch('setDirectory', that.defaultDirectory);
+      console.log('调用getTemplates开始');
+      that.getTemplates();
+    }, 2000);
   },
   beforeDestroy() {
     this.$cornerstone.disable(this.$refs.dicomViewer)
@@ -704,28 +759,65 @@ export default {
     },
     // 获取模板文件列表
     async getTemplates() {
-      // 获取目录树结构
-      const directoryTree = getDirectoryTree(that.targetDirectory);
-      // 获取最后两层的数据
-      const lastTwoLayers = getLastTwoLayers(directoryTree);
-      if (!lastTwoLayers) {
-        return false
+      console.log('getTemplates开始，目标目录:', that.targetDirectory);
+      
+      try {
+        // 使用新的DicomService进行分析
+        const DicomService = require('../../services/DicomService.js').default;
+        const dicomService = new DicomService();
+        const directoryTree = dicomService.getDirectoryTree(that.targetDirectory);
+        console.log('目录树构建完成:', directoryTree);
+        
+        const analysis = dicomService.analyzeDicomStructure(directoryTree);
+        console.log('DICOM结构分析完成:', analysis);
+        
+        if (!analysis) {
+          console.error('DICOM结构分析失败');
+          return false;
+        }
+        
+        if (analysis.isMultiPatient) {
+          console.log('多患者目录，患者数量:', analysis.totalPatients);
+          // 处理多患者情况
+          that.templates = [];
+          analysis.patients.forEach(patient => {
+            patient.seriesNodes.forEach(series => {
+              that.templates.push(series);
+            });
+          });
+        } else {
+          console.log('单患者目录，系列数量:', analysis.seriesNodes.length);
+          // 单患者情况
+          that.templates = analysis.seriesNodes;
+        }
+        
+        console.log('最终系列列表:', that.templates);
+        
+        if (that.templates.length === 0) {
+          console.error('没有找到任何系列');
+          return false;
+        }
+        
+        // 生成缩略图列表
+        console.log('开始生成缩略图列表');
+        const { thumbnails, dicomDict } = await dicomService.generateThumbnailList(that.templates);
+        that.thumbnails = thumbnails;
+        that.dictList = dicomDict[0] || [];
+        setItem('thumbnails', that.thumbnails);
+        
+        // 构建结构树
+        console.log('开始构建结构树');
+        that.dataTree = await buildTree(analysis.imageNodes, thumbnails.length);
+        
+        if (that.templates[0] && that.templates[0].children && that.templates[0].children[0]) {
+          console.log('加载第一个图像:', that.templates[0].children[0].path);
+          that.loadAndViewImage(that.templates[0].children[0].path);
+        }
+        
+        console.log('getTemplates完成');
+      } catch (error) {
+        console.error('getTemplates出错:', error);
       }
-      // 影像列表
-      that.templates = lastTwoLayers.secondLastLayer;
-      // 结构树列表
-      let treeDatas = lastTwoLayers.lastLayer;
-      // 生成缩略图列表
-      const { thumbnails, dicomDict } = await generateThumbnailList(that.templates);
-      that.thumbnails = thumbnails
-      that.dictList = dicomDict[0]
-      setItem('thumbnails', that.thumbnails)
-      // 构建结构树
-      that.dataTree = await buildTree(treeDatas, thumbnails.length)
-      that.loadAndViewImage(that.templates[0].children[0].path)
-      console.log('缩略图列表：', that.thumbnails)
-      console.log('影像列表：', that.templates)
-      console.log('结构树列表：', treeDatas)
     },
     async previewDicom(item, index = 0) {
       that.activeList = index

@@ -42,43 +42,43 @@ export class CornerstoneService {
    * 确保image loader已注册
    */
   ensureImageLoaderRegistered() {
-    console.log('ensureImageLoaderRegistered 被调用, imageLoaderRegistered:', this.imageLoaderRegistered);
+    // console.log('ensureImageLoaderRegistered 被调用, imageLoaderRegistered:', this.imageLoaderRegistered);
     
     // 强制重新注册，因为之前的注册可能不成功
-    console.log('强制重新注册image loader...');
+    // console.log('强制重新注册image loader...');
     this.imageLoaderRegistered = false;
 
     try {
       const cornerstone = this.getCornerstone();
-      console.log('Cornerstone实例:', cornerstone);
-      console.log('Cornerstone.imageLoader:', cornerstone.imageLoader);
-      console.log('Cornerstone的所有属性:', Object.keys(cornerstone));
+      // console.log('Cornerstone实例:', cornerstone);
+      // console.log('Cornerstone.imageLoader:', cornerstone.imageLoader);
+      // console.log('Cornerstone的所有属性:', Object.keys(cornerstone));
       
       // 检查是否有imageLoader属性
       if (!cornerstone.imageLoader) {
-        console.log('Cornerstone实例没有imageLoader属性，尝试直接注册image loader');
+        // console.log('Cornerstone实例没有imageLoader属性，尝试直接注册image loader');
         // 即使没有imageLoader属性，也要尝试注册
         const cornerstoneWadoImageLoader = require('cornerstone-wado-image-loader');
         cornerstoneWadoImageLoader.external.cornerstone = cornerstone;
         cornerstoneWadoImageLoader.external.dicomParser = require('dicom-parser');
         
         cornerstone.registerImageLoader('wadouri', cornerstoneWadoImageLoader.wadouri.loadImage);
-        console.log('CornerstoneService: wadouri image loader注册完成（无imageLoader属性）');
+        // console.log('CornerstoneService: wadouri image loader注册完成（无imageLoader属性）');
         this.imageLoaderRegistered = true;
         return;
       }
       
       // 检查已注册的image loaders
       const imageLoaders = cornerstone.imageLoader.getRegisteredImageLoaders();
-      console.log('已注册的image loaders:', imageLoaders);
+      // console.log('已注册的image loaders:', imageLoaders);
       
       if (imageLoaders.includes('wadouri')) {
-        console.log('wadouri image loader已经注册，无需重复注册');
+        // console.log('wadouri image loader已经注册，无需重复注册');
         this.imageLoaderRegistered = true;
         return;
       }
       
-      console.log('wadouri image loader未注册，尝试注册...');
+      // console.log('wadouri image loader未注册，尝试注册...');
       
       // 如果未注册，则注册
       const cornerstoneWadoImageLoader = require('cornerstone-wado-image-loader');
@@ -86,12 +86,12 @@ export class CornerstoneService {
       cornerstoneWadoImageLoader.external.dicomParser = require('dicom-parser');
       
       cornerstone.registerImageLoader('wadouri', cornerstoneWadoImageLoader.wadouri.loadImage);
-      console.log('CornerstoneService: wadouri image loader注册完成');
+      // console.log('CornerstoneService: wadouri image loader注册完成');
       
       this.imageLoaderRegistered = true;
     } catch (error) {
-      console.error('CornerstoneService: 注册image loader失败:', error);
-      console.error('错误详情:', error.stack);
+      // console.error('CornerstoneService: 注册image loader失败:', error);
+      // console.error('错误详情:', error.stack);
       throw error;
     }
   }
@@ -100,15 +100,15 @@ export class CornerstoneService {
    * 启用元素 - 基于dashboard的成功模式
    */
   enableElement(element) {
-    console.log('enableElement被调用, element:', element);
+    // console.log('enableElement被调用, element:', element);
     
     if (this.enabledElements.has(element)) {
-      console.log('元素已经启用，跳过');
+      // console.log('元素已经启用，跳过');
       return;
     }
 
     try {
-      console.log('开始启用Cornerstone元素（使用dashboard模式）...');
+      // console.log('开始启用Cornerstone元素（使用dashboard模式）...');
       
       // 直接使用cornerstone.enable，就像dashboard一样
       this.getCornerstone().enable(element);
@@ -117,9 +117,9 @@ export class CornerstoneService {
       // 添加基础工具
       this.addBasicTools();
       
-      console.log('Cornerstone元素已启用');
+      // console.log('Cornerstone元素已启用');
     } catch (error) {
-      console.error('启用Cornerstone元素失败:', error);
+      // console.error('启用Cornerstone元素失败:', error);
       throw error;
     }
   }
@@ -135,9 +135,9 @@ export class CornerstoneService {
     try {
       this.getCornerstone().disable(element);
       this.enabledElements.delete(element);
-      console.log('Cornerstone元素已禁用');
+      // console.log('Cornerstone元素已禁用');
     } catch (error) {
-      console.error('禁用Cornerstone元素失败:', error);
+      // console.error('禁用Cornerstone元素失败:', error);
     }
   }
 
@@ -145,7 +145,7 @@ export class CornerstoneService {
    * 添加基础工具 - 基于dashboard的成功模式
    */
   addBasicTools() {
-    console.log('添加基础工具（使用dashboard模式）...');
+    // console.log('添加基础工具（使用dashboard模式）...');
     try {
       const tools = this.getCornerstoneTools();
       
@@ -161,9 +161,9 @@ export class CornerstoneService {
       
       // 激活默认工具
       tools.setToolActive('Pan', { mouseButtonMask: 1 });
-      console.log('基础工具添加完成');
+      // console.log('基础工具添加完成');
     } catch (error) {
-      console.error('添加基础工具失败:', error);
+      // console.error('添加基础工具失败:', error);
     }
   }
 
@@ -182,19 +182,19 @@ export class CornerstoneService {
    */
   async loadAndViewImage(element, imageId) {
     try {
-      console.log('loadAndViewImage被调用（使用dashboard模式）');
-      console.log('准备加载图像:', imageId);
+      // console.log('loadAndViewImage被调用（使用dashboard模式）');
+      // console.log('准备加载图像:', imageId);
       
       // 直接使用cornerstone.loadImage和displayImage，就像dashboard一样
       this.getCornerstone().loadImage(imageId).then((image) => {
-        console.log('图像加载成功:', image);
+        // console.log('图像加载成功:', image);
         this.getCornerstone().displayImage(element, image);
-        console.log('图像显示完成');
+        // console.log('图像显示完成');
       }).catch((error) => {
-        console.error('图像加载失败:', error);
+        // console.error('图像加载失败:', error);
       });
     } catch (error) {
-      console.error('加载和显示图像失败:', error);
+      // console.error('加载和显示图像失败:', error);
       throw error;
     }
   }
@@ -204,30 +204,30 @@ export class CornerstoneService {
    */
   async loadStackToElement(element, stack) {
     try {
-      console.log('loadStackToElement被调用（使用dashboard模式）');
+      // console.log('loadStackToElement被调用（使用dashboard模式）');
       const imageId = stack.imageIds[stack.currentImageIdIndex];
-      console.log('准备加载图像:', imageId);
-      console.log('stack信息:', stack);
+      // console.log('准备加载图像:', imageId);
+      // console.log('stack信息:', stack);
       
       // 使用dashboard的成功模式
       const StackScrollMouseWheelTool = this.getCornerstoneTools().StackScrollMouseWheelTool;
       
       // 直接使用cornerstone.loadImage和displayImage，就像dashboard一样
       this.getCornerstone().loadImage(imageId).then((image) => {
-        console.log('图像加载成功:', image);
+        // console.log('图像加载成功:', image);
         this.getCornerstone().displayImage(element, image);
         this.getCornerstoneTools().addStackStateManager(element, ['stack']);
         this.getCornerstoneTools().addToolState(element, 'stack', stack);
-        console.log('图像显示完成');
+        // console.log('图像显示完成');
       }).catch((error) => {
-        console.error('图像加载失败:', error);
+        // console.error('图像加载失败:', error);
       });
       
       // 添加堆栈滚动工具
       this.getCornerstoneTools().addTool(StackScrollMouseWheelTool);
       this.getCornerstoneTools().setToolActive('StackScrollMouseWheel', {});
     } catch (error) {
-      console.error('加载图像堆栈失败:', error);
+      // console.error('加载图像堆栈失败:', error);
       throw error;
     }
   }
@@ -241,9 +241,9 @@ export class CornerstoneService {
       viewport.voi.windowWidth = windowWidth;
       viewport.voi.windowCenter = windowCenter;
       this.getCornerstone().setViewport(element, viewport);
-      console.log('窗口级别设置完成');
+      // console.log('窗口级别设置完成');
     } catch (error) {
-      console.error('设置窗口级别失败:', error);
+      // console.error('设置窗口级别失败:', error);
     }
   }
 
@@ -263,9 +263,9 @@ export class CornerstoneService {
       viewport.vflip = false;
       this.getCornerstone().setViewport(element, viewport);
       this.getCornerstone().updateImage(element);
-      console.log('视图重置完成');
+      // console.log('视图重置完成');
     } catch (error) {
-      console.error('重置视图失败:', error);
+      // console.error('重置视图失败:', error);
     }
   }
 
@@ -278,9 +278,9 @@ export class CornerstoneService {
       viewport.scale *= factor;
       this.getCornerstone().setViewport(element, viewport);
       this.getCornerstone().updateImage(element);
-      console.log('视图缩放完成');
+      // console.log('视图缩放完成');
     } catch (error) {
-      console.error('缩放视图失败:', error);
+      // console.error('缩放视图失败:', error);
     }
   }
 
@@ -294,9 +294,9 @@ export class CornerstoneService {
       viewport.translation.y += deltaY;
       this.getCornerstone().setViewport(element, viewport);
       this.getCornerstone().updateImage(element);
-      console.log('视图平移完成');
+      // console.log('视图平移完成');
     } catch (error) {
-      console.error('平移视图失败:', error);
+      // console.error('平移视图失败:', error);
     }
   }
 
@@ -309,9 +309,9 @@ export class CornerstoneService {
       viewport.rotation += degrees;
       this.getCornerstone().setViewport(element, viewport);
       this.getCornerstone().updateImage(element);
-      console.log('视图旋转完成');
+      // console.log('视图旋转完成');
     } catch (error) {
-      console.error('旋转视图失败:', error);
+      // console.error('旋转视图失败:', error);
     }
   }
 
@@ -324,9 +324,9 @@ export class CornerstoneService {
       viewport.hflip = !viewport.hflip;
       this.getCornerstone().setViewport(element, viewport);
       this.getCornerstone().updateImage(element);
-      console.log('水平翻转完成');
+      // console.log('水平翻转完成');
     } catch (error) {
-      console.error('水平翻转失败:', error);
+      // console.error('水平翻转失败:', error);
     }
   }
 
@@ -339,9 +339,9 @@ export class CornerstoneService {
       viewport.vflip = !viewport.vflip;
       this.getCornerstone().setViewport(element, viewport);
       this.getCornerstone().updateImage(element);
-      console.log('垂直翻转完成');
+      // console.log('垂直翻转完成');
     } catch (error) {
-      console.error('垂直翻转失败:', error);
+      // console.error('垂直翻转失败:', error);
     }
   }
 
@@ -365,11 +365,11 @@ export class CornerstoneService {
           viewport.translation.y = 0;
           this.getCornerstone().setViewport(element, viewport);
           this.getCornerstone().updateImage(element);
-          console.log('适应窗口完成');
+          // console.log('适应窗口完成');
         }
       }
     } catch (error) {
-      console.error('适应窗口失败:', error);
+      // console.error('适应窗口失败:', error);
     }
   }
 
@@ -380,7 +380,7 @@ export class CornerstoneService {
     try {
       return this.getCornerstone().getImage(element);
     } catch (error) {
-      console.error('获取当前图像失败:', error);
+      // console.error('获取当前图像失败:', error);
       return null;
     }
   }
@@ -392,7 +392,7 @@ export class CornerstoneService {
     try {
       return this.getCornerstone().getViewport(element);
     } catch (error) {
-      console.error('获取当前视口失败:', error);
+      // console.error('获取当前视口失败:', error);
       return null;
     }
   }
@@ -406,9 +406,9 @@ export class CornerstoneService {
       
       const image = await this.getCornerstone().loadImage(imageId);
       this.getCornerstone().displayImage(element, image);
-      console.log('图像加载并显示完成');
+      // console.log('图像加载并显示完成');
     } catch (error) {
-      console.error('加载并显示图像失败:', error);
+      // console.error('加载并显示图像失败:', error);
       throw error;
     }
   }

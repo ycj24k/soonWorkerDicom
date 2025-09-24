@@ -1,5 +1,5 @@
 {
-  "name": "soonworkerdicom",
+  "name": "soonview2",
   "version": "0.0.1",
   "author": "24kycj <1637269896@qq.com>",
   "description": "Cardsoon SoonWorkerDicom",
@@ -23,47 +23,37 @@
     "postinstall": "npm run lint:fix"
   },
   "build": {
-    "productName": "discworker",
-    "appId": "com.kashu.soonworkerdisk",
+    "productName": "SoonView",
+    "appId": "com.cardsoon.SoonView",
     "extraFiles": [
+
       {
-        "from": "./User Templates",
-        "to": "."
-      },
-      {
-        "from": "./cardsoonServer",
-        "to": "."
+        "from": "DICOM",
+        "to": "./DICOM"
       }
     ],
+    "linux": {
+          "maintainer": "Jerry Xu <jerry79.xu@gmail.com>",
+          "category": "Utility",
+          "target": [
+            {
+              "target": "AppImage",
+              "arch": ["x64", "arm64"]
+            },
+            {
+              "target": "deb",
+              "arch": ["x64", "arm64"]
+            },
+            {
+              "target": "rpm",
+              "arch": ["x64", "arm64"]
+            }
+          ],
+          "icon": "public/images/favicon.svg"
+        },
+    "copyright": "Copyright@2023 cardsoon.com",
     "directories": {
       "output": "build"
-    },
-    "files": [
-      "dist/electron/**/*"
-    ],
-    "dmg": {
-      "contents": [
-        {
-          "x": 410,
-          "y": 150,
-          "type": "link",
-          "path": "/Applications"
-        },
-        {
-          "x": 130,
-          "y": 150,
-          "type": "file"
-        }
-      ]
-    },
-    "mac": {
-      "icon": "build/icons/icon.icns"
-    },
-    "win": {
-      "icon": "build/icons/icon.ico"
-    },
-    "linux": {
-      "icon": "build/icons"
     }
   },
   "dependencies": {
@@ -71,7 +61,7 @@
     "archiver": "^7.0.1",
     "archiver-zip-encrypted": "^2.0.0",
     "axios": "^0.18.0",
-    "canvas": "2.11.2",
+    "canvas": "^3.2.0",
     "core-js": "3",
     "cornerstone-core": "^2.6.1",
     "cornerstone-math": "^0.1.10",
@@ -104,6 +94,7 @@
     "ajv": "^6.5.0",
     "autoprefixer": "^8.0.0",
     "babel-loader": "8.4.1",
+    "babel-minify-webpack-plugin": "^0.3.1",
     "cfonts": "^2.1.2",
     "chalk": "^2.4.1",
     "copy-webpack-plugin": "^4.5.1",

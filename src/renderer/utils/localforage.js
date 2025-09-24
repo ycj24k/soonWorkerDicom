@@ -92,7 +92,7 @@ export const clearAll = () => {
   // 清空整个数据库
   localforage.clear()
   .then(() => {
-    console.log('Kobetools 数据库已清空');
+    // console.log('Kobetools 数据库已清空');
   })
   .catch((error) => {
     console.error('清空数据库失败:', error);

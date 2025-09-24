@@ -319,7 +319,7 @@ const actions = {
   },
   // 初始化websocket
   initWebSocket({ state, commit, dispatch, rootState }) {
-    if (typeof WebSocket === 'undefined') return console.log('您的浏览器不支持websocket')
+    if (typeof WebSocket === 'undefined') return // console.log('您的浏览器不支持websocket')
     if ((websock && state.isConnect) || !rootState.user.token || state.connecting) {
       return
     }
@@ -436,7 +436,7 @@ const actions = {
         let error = data.resp_info
         if (error.error1) {
           let errors = error.error1.toString(2).split('').reverse()
-          console.log(errors)
+          // console.log(errors)
           for (let i = 0; i < errors.length; i++) {
             if (errors[i] == 1) {
               setTimeout(() => {
@@ -527,7 +527,7 @@ const actions = {
       }
     } else {
       // 未知消息
-      console.log('未知消息: ' + JSON.stringify(data))
+      // console.log('未知消息: ' + JSON.stringify(data))
     }
   },
   // 心跳检测重连
@@ -560,14 +560,14 @@ const actions = {
   },
   // 链接建立之后执行的方法
   websocketonopen: ({ commit, dispatch }, res) => {
-    console.log('链接建立之后执行send方法发送数据', res)
+    // console.log('链接建立之后执行send方法发送数据', res)
     commit('setData', { name: 'connecting', data: false })
     commit('setData', { name: 'isConnect', data: true })
     commit('setData', { name: 'serviceStatus', data: true })
   },
   // 链接关闭之后执行的方法
   websocketonclose: ({ state, commit, dispatch }, res) => {
-    console.log('断开链接', res)
+    // console.log('断开链接', res)
     // 关闭
     commit('setData', { name: 'connecting', data: false })
     commit('setData', { name: 'isConnect', data: false })

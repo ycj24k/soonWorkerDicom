@@ -49,7 +49,7 @@ export class GridViewService {
     this.gridState.isActive = true;
     this.gridState.layout = { rows, cols, totalSlots: rows * cols };
     this.initializeViewports();
-    console.log('网格布局已激活:', { rows, cols });
+    // console.log('网格布局已激活:', { rows, cols });
   }
 
   /**
@@ -59,7 +59,7 @@ export class GridViewService {
     this.gridState.isActive = false;
     this.gridState.viewports = [];
     this.gridState.selectedViewportIndex = 0;
-    console.log('网格布局已停用');
+    // console.log('网格布局已停用');
   }
 
   /**
@@ -70,7 +70,7 @@ export class GridViewService {
       const { rows, cols } = this.gridState.layout;
       container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
       container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-      console.log('网格样式已应用:', { rows, cols });
+      // console.log('网格样式已应用:', { rows, cols });
     }
   }
 
@@ -80,7 +80,7 @@ export class GridViewService {
   clearGridStyles(container) {
     container.style.gridTemplateColumns = '';
     container.style.gridTemplateRows = '';
-    console.log('网格样式已清除');
+    // console.log('网格样式已清除');
   }
 
   /**
@@ -114,7 +114,7 @@ export class GridViewService {
       viewport.imageIndex = imageIndex;
       viewport.isActive = true;
 
-      console.log('图像已加载到视口:', { viewportIndex, row, col, imageId });
+      // console.log('图像已加载到视口:', { viewportIndex, row, col, imageId });
     } catch (error) {
       console.error('加载图像到视口失败:', error);
       throw error;
@@ -152,7 +152,7 @@ export class GridViewService {
       // 更新视口样式
       this.updateViewportStyles();
       
-      console.log('视口已选择:', index);
+      // console.log('视口已选择:', index);
     }
   }
 
@@ -201,7 +201,7 @@ export class GridViewService {
       viewport.isActive = false;
     });
 
-    console.log('所有视口已清除');
+    // console.log('所有视口已清除');
   }
 
   /**

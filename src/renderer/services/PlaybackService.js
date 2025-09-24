@@ -46,14 +46,14 @@ export class PlaybackService {
     const endFrame = options.endFrame || imageIds.length - 1;
     const loop = options.loop !== false; // 默认循环
 
-    console.log('开始播放:', {
-      totalFrames: imageIds.length,
-      speed: this.playbackControl.speed,
-      direction: this.playbackControl.direction,
-      startFrame,
-      endFrame,
-      loop
-    });
+    // console.log('开始播放:', {
+    //   totalFrames: imageIds.length,
+    //   speed: this.playbackControl.speed,
+    //   direction: this.playbackControl.direction,
+    //   startFrame,
+    //   endFrame,
+    //   loop
+    // });
 
     // 开始播放循环
     this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
@@ -126,7 +126,7 @@ export class PlaybackService {
     }
 
     this.playbackControl.isPlaying = false;
-    console.log('播放已停止');
+    // console.log('播放已停止');
   }
 
   /**
@@ -139,7 +139,7 @@ export class PlaybackService {
     }
 
     this.playbackControl.isPlaying = false;
-    console.log('播放已暂停');
+    // console.log('播放已暂停');
   }
 
   /**
@@ -152,7 +152,7 @@ export class PlaybackService {
 
     this.playbackControl.isPlaying = true;
     this.playbackLoop(element, imageIds, 0, imageIds.length - 1, true);
-    console.log('播放已恢复');
+    // console.log('播放已恢复');
   }
 
   /**
@@ -160,7 +160,7 @@ export class PlaybackService {
    */
   setPlaybackSpeed(speed) {
     this.playbackControl.speed = Math.max(1, Math.min(30, speed)); // 限制在1-30帧/秒
-    console.log('播放速度已设置:', this.playbackControl.speed);
+    // console.log('播放速度已设置:', this.playbackControl.speed);
   }
 
   /**
@@ -169,7 +169,7 @@ export class PlaybackService {
   setPlaybackDirection(direction) {
     if (direction === 'forward' || direction === 'backward') {
       this.playbackControl.direction = direction;
-      console.log('播放方向已设置:', direction);
+      // console.log('播放方向已设置:', direction);
     }
   }
 
@@ -180,7 +180,7 @@ export class PlaybackService {
     if (frameIndex >= 0 && frameIndex < imageIds.length) {
       this.playbackControl.currentFrame = frameIndex;
       this.loadFrame(element, imageIds[frameIndex]);
-      console.log('跳转到帧:', frameIndex);
+      // console.log('跳转到帧:', frameIndex);
     }
   }
 
@@ -265,6 +265,6 @@ export class PlaybackService {
       totalFrames: 0,
       direction: 'forward'
     };
-    console.log('播放服务已清理');
+    // console.log('播放服务已清理');
   }
 }
