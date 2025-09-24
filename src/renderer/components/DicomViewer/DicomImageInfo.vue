@@ -79,8 +79,8 @@ export default {
     
     currentWindowLevel() {
       return {
-        ww: this.currentWindowLevelPreset?.ww || 400,
-        wc: this.currentWindowLevelPreset?.wc || 50
+        ww: (this.currentWindowLevelPreset && this.currentWindowLevelPreset.ww) || 400,
+        wc: (this.currentWindowLevelPreset && this.currentWindowLevelPreset.wc) || 50
       };
     }
   }

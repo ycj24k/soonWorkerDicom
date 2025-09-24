@@ -63,7 +63,7 @@ function startRenderer () {
       compiler,
       {
         contentBase: path.join(__dirname, '../'),
-        quiet: true,
+        quiet: false,
         hot: true,
         before (app, ctx) {
           app.use(hotMiddleware)

@@ -13,21 +13,44 @@
           >
             <img class="action_img" src="@/assets/images/action3.png" />
           </div>
+          <div 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 4 }" 
+            @mousedown="actionClick = 4"
+            @mouseup="actionClick = 0"
+            @click="$emit('open-file')"
+          >
+            <img class="action_img" src="@/assets/images/action3.png" />
+          </div>
         </div>
         <div class="flex_box flex_row_center action_b">
-          <div class="action_name action_name1">打开</div>
+          <div class="action_name action_name1">打开目录</div>
+          <div class="action_name action_name1">打开文件</div>
         </div>
       </div>
     </div>
 
-    <!-- 影像排列 -->
+    <!-- 影像操作 -->
     <div class="flex_box flex_col_top action_items">
+      <!-- 影像排列按钮组 -->
       <div class="action_item">
         <div class="flex_box flex_col_top action_btns">
-          <div class="action_btn" :class="{ 'action_btn1': actionClick === 1 }" @mousedown="actionClick = 1" @mouseup="actionClick = 0">
+          <div 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 1 || isGridViewActive }" 
+            @mousedown="actionClick = 1" 
+            @mouseup="actionClick = 0"
+            @click="$emit('toggle-grid-layout')"
+          >
             <img class="action_img action_img1" src="@/assets/images/action1.png" />
           </div>
-          <div class="action_btn" :class="{ 'action_btn1': actionClick === 2 }" @mousedown="actionClick = 2" @mouseup="actionClick = 0">
+          <div 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 2 || isPlaying }" 
+            @mousedown="actionClick = 2" 
+            @mouseup="actionClick = 0"
+            @click="$emit('toggle-playback')"
+          >
             <img class="action_img action_img1" src="@/assets/images/action2.png" />
           </div>
         </div>
@@ -36,17 +59,14 @@
           <div class="action_line"></div>
         </div>
       </div>
-    </div>
-
-    <!-- 基本操作 -->
-    <div class="flex_box flex_col_top action_items">
+      
       <div class="action_item">
         <div class="flex_box flex_col_top action_btns">
           <div 
             @click="$emit('reset-viewport')" 
             class="action_btn" 
-            :class="{ 'action_btn1': actionClick === 4 }"
-            @mousedown="actionClick = 4" 
+            :class="{ 'action_btn1': actionClick === 10 }"
+            @mousedown="actionClick = 10" 
             @mouseup="actionClick = 0"
           >
             <img class="action_img" src="@/assets/images/action4.png" />
@@ -146,14 +166,14 @@
       </div>
     </div>
 
-    <!-- 交互工具 -->
+    <!-- 工具操作 -->
     <div class="flex_box flex_col_top action_items">
       <div class="action_item">
         <div class="flex_box flex_col_top action_btns">
           <div 
             @click="$emit('activate-tool', { toolName: 'Zoom', actionId: 11 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(11) }"
+            :class="{ 'action_btn1': actionClick === 11 }"
             @mousedown="actionClick = 11" 
             @mouseup="actionClick = 0"
           >
@@ -170,7 +190,7 @@
           <div 
             @click="$emit('activate-tool', { toolName: 'Pan', actionId: 12 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(12) }"
+            :class="{ 'action_btn1': actionClick === 12 }"
             @mousedown="actionClick = 12" 
             @mouseup="actionClick = 0"
           >
@@ -187,7 +207,7 @@
           <div 
             @click="$emit('activate-tool', { toolName: 'Probe', actionId: 13 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(13) }"
+            :class="{ 'action_btn1': actionClick === 13 }"
             @mousedown="actionClick = 13" 
             @mouseup="actionClick = 0"
           >
@@ -199,17 +219,21 @@
         </div>
       </div>
 
-      <!-- 窗宽窗位 -->
       <div class="action_item">
         <div class="flex_box flex_col_top action_btns">
-          <div class="action_btn" :class="{ 'action_btn1': actionClick === 14 || isToolActive(14) }" @mousedown="actionClick = 14" @mouseup="actionClick = 0">
+          <div 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 14 || activeAction === 14 }"
+            @mousedown="actionClick = 14" 
+            @mouseup="actionClick = 0"
+            @click="$emit('activate-tool', { toolName: 'Wwwc', actionId: 14 })"
+          >
             <img class="action_img action_img1" src="@/assets/images/action14.png" />
-            <img v-if="isToolActive(14)" class="action_img_active" :src="currentWindowLevelPreset.img" />
-            <div @click="$emit('activate-tool', { toolName: 'Wwwc', actionId: 14 })" class="action_btn_content"></div>
+            <img v-if="activeAction === 14" class="action_img_active" :src="cwImgs[active2].img" />
             <el-popover v-model="cwShow" placement="bottom" trigger="click">
               <div class="flex_box" style="width: auto;gap: 10px;">
-                <div v-for="(item, index) in windowLevelPresets" :key="index">
-                  <img @click="$emit('set-window-level', index)" style="cursor: pointer;" :src="item.img" />
+                <div v-for="(item, index) in cwImgs" :key="index">
+                  <img @click="cwChange(index)" style="cursor: pointer;" :src="item.img" />
                 </div>
               </div>
               <div slot="reference" class="action_btn_r"></div>
@@ -218,6 +242,74 @@
         </div>
         <div class="flex_box flex_row_center action_b">
           <div class="action_name action_name1">窗宽窗位</div>
+        </div>
+      </div>
+
+      <div class="action_item">
+        <div class="flex_box flex_col_top action_btns">
+          <div 
+            @click="$emit('activate-tool', { toolName: 'Crosshairs', actionId: 15 })" 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 15 }"
+            @mousedown="actionClick = 15" 
+            @mouseup="actionClick = 0"
+          >
+            <img class="action_img" src="@/assets/images/action15.png" />
+          </div>
+        </div>
+        <div class="flex_box flex_row_center action_b">
+          <div class="action_name action_name1">定位线</div>
+        </div>
+      </div>
+
+      <div class="action_item">
+        <div class="flex_box flex_col_top action_btns">
+          <div 
+            @click="$emit('activate-tool', { toolName: 'StackScroll', actionId: 16 })" 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 16 }"
+            @mousedown="actionClick = 16" 
+            @mouseup="actionClick = 0"
+          >
+            <img class="action_img" src="@/assets/images/action16.png" />
+          </div>
+        </div>
+        <div class="flex_box flex_row_center action_b">
+          <div class="action_name action_name1">单张播放</div>
+        </div>
+      </div>
+
+      <div class="action_item">
+        <div class="flex_box flex_col_top action_btns">
+          <div 
+            @click="$emit('activate-tool', { toolName: 'Length', actionId: 17 })" 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 17 }"
+            @mousedown="actionClick = 17" 
+            @mouseup="actionClick = 0"
+          >
+            <img class="action_img" src="@/assets/images/action17.png" />
+          </div>
+        </div>
+        <div class="flex_box flex_row_center action_b">
+          <div class="action_name action_name1">点距调整</div>
+        </div>
+      </div>
+
+      <div class="action_item">
+        <div class="flex_box flex_col_top action_btns">
+          <div 
+            @click="$emit('show-image-info')" 
+            class="action_btn" 
+            :class="{ 'action_btn1': actionClick === 18 }"
+            @mousedown="actionClick = 18" 
+            @mouseup="actionClick = 0"
+          >
+            <img class="action_img" src="@/assets/images/action18.png" />
+          </div>
+        </div>
+        <div class="flex_box flex_row_center action_b">
+          <div class="action_name action_name1">图像信息</div>
         </div>
       </div>
     </div>
@@ -238,7 +330,7 @@
           <div 
             @click="$emit('activate-tool', { toolName: 'Pan', actionId: 20 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(20) }"
+            :class="{ 'action_btn1': actionClick === 20 }"
             @mousedown="actionClick = 20" 
             @mouseup="actionClick = 0"
           >
@@ -256,7 +348,7 @@
           <div 
             @click="$emit('activate-tool', { toolName: 'Length', actionId: 21 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(21) }"
+            :class="{ 'action_btn1': actionClick === 21 }"
             @mousedown="actionClick = 21" 
             @mouseup="actionClick = 0"
           >
@@ -273,7 +365,7 @@
           <div 
             @click="$emit('activate-tool', { toolName: 'Angle', actionId: 22 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(22) }"
+            :class="{ 'action_btn1': actionClick === 22 }"
             @mousedown="actionClick = 22" 
             @mouseup="actionClick = 0"
           >
@@ -290,7 +382,7 @@
           <div 
             @click="$emit('activate-tool', { toolName: 'RectangleRoi', actionId: 23 })" 
             class="action_btn" 
-            :class="{ 'action_btn1': isToolActive(23) }"
+            :class="{ 'action_btn1': actionClick === 23 }"
             @mousedown="actionClick = 23" 
             @mouseup="actionClick = 0"
           >
@@ -302,6 +394,7 @@
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -313,15 +406,29 @@ export default {
   data() {
     return {
       actionClick: 0,
-      cwShow: false
+      activeAction: 0,
+      active2: 0,
+      cwShow: false,
+      // 窗宽窗位预设
+      cwImgs: [
+        { img: require('@/assets/images/action14-1.png'), ww: 80, wc: 35 },
+        { img: require('@/assets/images/action14-2.png'), ww: 400, wc: 50 },
+        { img: require('@/assets/images/action14-3.png'), ww: 2000, wc: 500 },
+        { img: require('@/assets/images/action14-4.png'), ww: 1500, wc: -600 }
+      ]
     };
   },
   computed: {
-    ...mapGetters('viewer', ['isToolActive', 'currentWindowLevelPreset']),
-    ...mapGetters('viewer', { windowLevelPresets: 'state' })
+    ...mapGetters('viewer', ['isToolActive', 'currentWindowLevelPreset', 'isGridViewActive', 'isPlaying'])
   },
   methods: {
-    // 工具栏事件处理都通过emit传递给父组件
+    // 窗宽窗位切换
+    cwChange(index) {
+      this.active2 = index;
+      this.cwShow = false;
+      this.$emit('activate-tool', { toolName: 'Wwwc', actionId: 14 });
+      this.$emit('set-window-level', index);
+    }
   }
 };
 </script>
@@ -341,83 +448,86 @@ export default {
     width: 43px;
   }
 
-  .action_img_active {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 35px;
-    height: 35px;
-    z-index: 2;
+  .action_btn {
+    width: 43px;
+    height: 43px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    transition: all 0.2s;
+
+    &:hover {
+      background: #f5f5f5;
+    }
+
+    &.action_btn1 {
+      background: #409eff;
+      border-color: #409eff;
+
+      .action_img {
+        filter: brightness(0) invert(1);
+      }
+    }
+  }
+
+  .action_name {
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+    margin-top: 2px;
+  }
+
+  .action_name1 {
+    width: 43px;
+  }
+
+  .action_line {
+    width: 1px;
+    height: 12px;
+    background: #ddd;
+    margin: 0 2px;
   }
 
   .action_items {
-    .action_item {
-      .action_btns {
-        .action_btn {
-          border-radius: 4px;
-          padding: 1px;
-          margin: 2px;
-          position: relative;
-          cursor: pointer;
-          height: 37px;
+    gap: 10px;
+  }
 
-          .action_btn_content {
-            position: absolute;
-            z-index: 3;
-            top: 0;
-            left: 0;
-            width: 35px;
-            height: 35px;
-          }
+  .action_item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
 
-          .action_btn_r {
-            position: absolute;
-            z-index: 3;
-            top: 0;
-            right: 0;
-            width: 8px;
-            height: 35px;
-          }
-        }
+  .action_btns {
+    gap: 2px;
+  }
 
-        .action_btn1 {
-          border: 1px solid #333;
-          padding: 0;
-        }
-      }
+  .action_b {
+    gap: 2px;
+  }
 
-      .action_b {
-        position: relative;
-        padding-top: 2px;
+  .action_img_active {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 20px;
+    z-index: 10;
+  }
 
-        .action_name {
-          position: relative;
-          font-size: 12px;
-          color: #4D4D4D;
-          padding: 0 6px;
-          background-color: #fff;
-          text-align: center;
-          z-index: 9;
-        }
-
-        .action_name1 {
-          width: 35px;
-          padding: 0;
-        }
-
-        .action_line {
-          position: absolute;
-          width: 96%;
-          height: 8px;
-          border-width: 0 1px 1px 1px;
-          border-color: #444;
-          border-style: solid;
-          top: 4px;
-          left: 2%;
-          z-index: 1;
-        }
-      }
-    }
+  .action_btn_r {
+    position: absolute;
+    bottom: -5px;
+    right: -5px;
+    width: 10px;
+    height: 10px;
+    z-index: 15;
   }
 }
 </style>

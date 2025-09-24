@@ -358,7 +358,7 @@ const dcmjs = require('dcmjs');
 const { app, dialog } = require('@electron/remote')
 const { exec } = require('child_process')
 import { Notification } from 'element-ui';
-import { template } from 'babel-core';
+// 移除无用的babel-core导入
 let that
 // 获取图像数据
 async function generateThumbnailList(dicomFileList, targetWidth = 1024) {

@@ -7,7 +7,7 @@ const { dependencies } = require('../package.json')
 const webpack = require('webpack')
 const config = require('../config/index.js')
 
-const MinifyPlugin = require("babel-minify-webpack-plugin")
+// 移除babel-minify-webpack-plugin
 const CopyWebpackPlugin = require('copy-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
@@ -186,7 +186,6 @@ if (process.env.NODE_ENV === 'production') {
   rendererConfig.devtool = ''
 
   rendererConfig.plugins.push(
-    new MinifyPlugin(),
     new CopyWebpackPlugin([
       {
         from: path.join(__dirname, '../static'),

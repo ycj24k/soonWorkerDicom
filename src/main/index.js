@@ -1,5 +1,4 @@
 import { app, BrowserWindow, Menu, ipcMain  } from 'electron'
-import '../renderer/store'
 
 /**
  * Set `__static` path to static files in production

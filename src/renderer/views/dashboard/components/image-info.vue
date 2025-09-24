@@ -30,7 +30,8 @@
 </template>
 
 <script>
-import { getItem } from '@/utils/localforage';
+import { mapGetters } from 'vuex';
+
 export default {
     name: 'ImageInfo',
     data() {
@@ -39,14 +40,33 @@ export default {
             tableData: []
         }
     },
+    computed: {
+        ...mapGetters('dicom', ['currentDicomDict'])
+    },
     mounted() {
 
     },
     methods: {
-        async show(e) {
-            let list = await getItem('dicomDict')
-            this.tableData = list[0]
-            this.infoShow = true
+        show(seriesIndex) {
+            console.log('ImageInfo.show被调用，系列索引:', seriesIndex);
+            try {
+                // 从Vuex store获取当前系列的DICOM数据
+                console.log('currentDicomDict:', this.currentDicomDict);
+                if (this.currentDicomDict && this.currentDicomDict.length > 0) {
+                    this.tableData = this.currentDicomDict;
+                    console.log('找到DICOM数据:', this.tableData.length, '个标签');
+                    console.log('第一个标签示例:', this.tableData[0]);
+                } else {
+                    console.log('没有找到DICOM数据，currentDicomDict:', this.currentDicomDict);
+                    this.tableData = [];
+                }
+                this.infoShow = true;
+                console.log('图像信息对话框已显示');
+            } catch (error) {
+                console.error('显示图像信息失败:', error);
+                this.tableData = [];
+                this.infoShow = true;
+            }
         },
         closeDialog() {
             this.infoShow = false
