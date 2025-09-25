@@ -19,6 +19,28 @@
             <div class="action_name action_name1">打开</div>
           </div>
         </div>
+        <div @click="testLoading" class="action_item">
+          <div class="flex_box flex_col_top action_btns">
+            <div class="action_btn" :class="{ 'action_btn1': actionClick == 99 }" @mousedown="actionClick = 99"
+              @mouseup="actionClick = 0">
+              <img class="action_img" src="@/assets/images/action1.png" />
+            </div>
+          </div>
+          <div class="flex_box flex_row_center action_b">
+            <div class="action_name action_name1">测试加载</div>
+          </div>
+        </div>
+        <div @click="forceShowLoading" class="action_item">
+          <div class="flex_box flex_col_top action_btns">
+            <div class="action_btn" :class="{ 'action_btn1': actionClick == 98 }" @mousedown="actionClick = 98"
+              @mouseup="actionClick = 0">
+              <img class="action_img" src="@/assets/images/action1.png" />
+            </div>
+          </div>
+          <div class="flex_box flex_row_center action_b">
+            <div class="action_name action_name1">强制显示</div>
+          </div>
+        </div>
       </div>
       <div class="flex_box flex_col_top action_items">
         <div class="action_item">
@@ -338,6 +360,15 @@
     </div>
     <!-- 图像信息 -->
     <image-info ref="imageInfo" class="image-info"></image-info>
+    
+    <!-- 加载动画 -->
+    <div v-show="loading" class="loading-overlay" style="display: flex !important;">
+      <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">{{ loadingText }}</div>
+        <div style="margin-top: 20px; font-size: 12px; color: #ccc;">Loading状态: {{ loading }}</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -595,6 +626,8 @@ export default {
       activeActionChild: 0, // 当前操作子操作
       activeImg: 0, // 当前图像
       actionClick: 0,
+      loading: false, // 加载状态
+      loadingText: '正在加载DICOM文件...', // 加载文本
       // 窗位
       cwImgs: [
         {
@@ -635,14 +668,10 @@ export default {
     that.addTools()
     that.getTemplates()
     
-    // 默认加载100MB目录进行调试
-    console.log('设置自动加载定时器，默认目录:', that.defaultDirectory);
+    // 默认加载100MB目录
     setTimeout(() => {
-      console.log('=== 开始默认加载100MB目录进行调试 ===');
       that.targetDirectory = that.defaultDirectory;
-      console.log('设置目标目录:', that.targetDirectory);
       that.$store.dispatch('setDirectory', that.defaultDirectory);
-      console.log('调用getTemplates开始');
       that.getTemplates();
     }, 2000);
   },
@@ -759,25 +788,34 @@ export default {
     },
     // 获取模板文件列表
     async getTemplates() {
-      console.log('getTemplates开始，目标目录:', that.targetDirectory);
+      // 显示加载动画
+      that.loading = true;
+      that.loadingText = '正在分析DICOM目录结构...';
+      
+      // 确保DOM更新
+      await that.$nextTick();
+      
+      // 添加最小显示时间，确保用户能看到加载动画
+      const minLoadingTime = new Promise(resolve => setTimeout(resolve, 1000));
       
       try {
         // 使用新的DicomService进行分析
         const DicomService = require('../../services/DicomService.js').default;
         const dicomService = new DicomService();
-        const directoryTree = dicomService.getDirectoryTree(that.targetDirectory);
-        console.log('目录树构建完成:', directoryTree);
         
+        that.loadingText = '正在扫描目录文件...';
+        const directoryTree = dicomService.getDirectoryTree(that.targetDirectory);
+        
+        that.loadingText = '正在解析DICOM结构...';
         const analysis = dicomService.analyzeDicomStructure(directoryTree);
-        console.log('DICOM结构分析完成:', analysis);
         
         if (!analysis) {
-          console.error('DICOM结构分析失败');
+          await minLoadingTime;
+          that.loading = false;
           return false;
         }
         
         if (analysis.isMultiPatient) {
-          console.log('多患者目录，患者数量:', analysis.totalPatients);
           // 处理多患者情况
           that.templates = [];
           analysis.patients.forEach(patient => {
@@ -786,37 +824,38 @@ export default {
             });
           });
         } else {
-          console.log('单患者目录，系列数量:', analysis.seriesNodes.length);
           // 单患者情况
           that.templates = analysis.seriesNodes;
         }
         
-        console.log('最终系列列表:', that.templates);
-        
         if (that.templates.length === 0) {
-          console.error('没有找到任何系列');
+          await minLoadingTime;
+          that.loading = false;
           return false;
         }
         
         // 生成缩略图列表
-        console.log('开始生成缩略图列表');
+        that.loadingText = '正在生成图像缩略图...';
         const { thumbnails, dicomDict } = await dicomService.generateThumbnailList(that.templates);
         that.thumbnails = thumbnails;
         that.dictList = dicomDict[0] || [];
         setItem('thumbnails', that.thumbnails);
         
         // 构建结构树
-        console.log('开始构建结构树');
+        that.loadingText = '正在构建目录树...';
         that.dataTree = await buildTree(analysis.imageNodes, thumbnails.length);
         
         if (that.templates[0] && that.templates[0].children && that.templates[0].children[0]) {
-          console.log('加载第一个图像:', that.templates[0].children[0].path);
+          that.loadingText = '正在加载图像...';
           that.loadAndViewImage(that.templates[0].children[0].path);
         }
         
-        console.log('getTemplates完成');
+        // 确保最小显示时间后再隐藏加载动画
+        await minLoadingTime;
+        that.loading = false;
       } catch (error) {
-        console.error('getTemplates出错:', error);
+        await minLoadingTime;
+        that.loading = false;
       }
     },
     async previewDicom(item, index = 0) {
@@ -941,6 +980,49 @@ export default {
     // 展示图像信息
     showInfo() {
       this.$refs.imageInfo.show(this.activeList);
+    },
+    // 测试加载动画
+    async testLoading() {
+      console.log('测试加载动画开始，当前loading状态:', this.loading);
+      this.loading = true;
+      this.loadingText = '正在测试加载动画...';
+      
+      // 确保DOM更新
+      await this.$nextTick();
+      console.log('设置loading为true，当前状态:', this.loading);
+      
+      // 模拟不同的加载阶段
+      const stages = [
+        '正在分析DICOM目录结构...',
+        '正在扫描目录文件...',
+        '正在解析DICOM结构...',
+        '正在生成图像缩略图...',
+        '正在构建目录树...',
+        '正在加载图像...'
+      ];
+      
+      for (let i = 0; i < stages.length; i++) {
+        this.loadingText = stages[i];
+        await this.$nextTick();
+        console.log('更新加载文本:', this.loadingText);
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
+      
+      this.loading = false;
+      await this.$nextTick();
+      console.log('测试加载动画结束，当前loading状态:', this.loading);
+    },
+    // 强制显示加载动画
+    forceShowLoading() {
+      this.loading = true;
+      this.loadingText = '强制显示加载动画';
+      console.log('强制显示加载动画，loading状态:', this.loading);
+      
+      // 3秒后自动隐藏
+      setTimeout(() => {
+        this.loading = false;
+        console.log('自动隐藏加载动画，loading状态:', this.loading);
+      }, 3000);
     }
   }
 }
@@ -1007,6 +1089,7 @@ export default {
             position: relative;
             cursor: pointer;
             height: 37px;
+            z-index: 1;
 
             .action_btn_content {
               position: absolute;
@@ -1235,6 +1318,48 @@ export default {
         text-align: center;
       }
     }
+  }
+  
+  /* 加载动画样式 */
+  .loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+  }
+  
+  .loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: white;
+  }
+  
+  .loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid #409EFF;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+  }
+  
+  .loading-text {
+    font-size: 16px;
+    font-weight: 500;
+    color: #fff;
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
   }
 }
 </style>

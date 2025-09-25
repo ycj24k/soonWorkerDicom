@@ -62,6 +62,15 @@
 
     <!-- 图像详细信息对话框 -->
     <ImageInfo ref="imageInfo" />
+    
+    <!-- 加载动画 -->
+    <div v-if="loading || localLoading" class="loading-overlay">
+      <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">{{ loadingText }}</div>
+      </div>
+    </div>
+    
   </div>
 </template>
 
@@ -93,6 +102,8 @@ export default {
     return {
       showGridLayoutSelector: false,
       showPlaybackDialog: false,
+      // 本地loading状态
+      localLoading: false,
       // 鼠标样式控制
       mode: '2', // 当前模式
       activeAction: 0,
@@ -108,7 +119,7 @@ export default {
     };
   },
   computed: {
-    ...mapState('dicom', ['loading', 'error']),
+    ...mapState('dicom', ['loading', 'loadingText', 'error']),
     ...mapState('viewer', ['toolState']),
     ...mapGetters('dicom', ['currentImage', 'currentImageIds']),
     ...mapGetters('viewer', ['isGridViewActive', 'currentGridLayout', 'selectedGridViewport', 'isPlaying', 'playbackSpeed']),
@@ -125,11 +136,13 @@ export default {
       return gridViewService.getGridState();
     }
   },
-  mounted() {
+  async mounted() {
     this.initializeViewer();
     this.setupKeyboardShortcuts();
-    // 自动加载PATS目录
-    this.autoLoadPatsDirectory();
+    // 等待一个微任务周期，确保Cornerstone初始化完成
+    await this.$nextTick();
+    // 自动加载DICOM目录
+    this.autoLoadDicomDirectory();
   },
   beforeDestroy() {
     this.cleanupViewer();
@@ -179,31 +192,51 @@ export default {
     },
 
     /**
-     * 自动加载PATS目录
+     * 自动加载DICOM目录
      */
-    async autoLoadPatsDirectory() {
+    async autoLoadDicomDirectory() {
       try {
-        // 延迟加载，确保程序完全启动
-        setTimeout(async () => {
+        // 设置超时保护，防止loading状态一直显示
+        const timeoutId = setTimeout(() => {
+          this.$store.commit('dicom/SET_LOADING', false);
+          this.localLoading = false;
+        }, 30000); // 30秒超时
+        
+        const path = require('path');
+        const fs = require('fs');
+        
+        // 加载DICOM目录
+        const dicomPath = path.join(process.cwd(), 'DICOM');
+        
+        if (fs.existsSync(dicomPath)) {
           try {
-            const path = require('path');
-            const patsPath = path.join(process.cwd(), 'PATS');
-            // console.log('自动加载PATS目录:', patsPath);
+            await this.loadDicomDirectory(dicomPath);
             
-            // 检查PATS目录是否存在
-            const fs = require('fs');
-            if (fs.existsSync(patsPath)) {
-              await this.loadDicomDirectory(patsPath);
-              // console.log('PATS目录加载成功');
-            } else {
-              // console.log('PATS目录不存在，跳过自动加载');
-            }
+            // 加载完成后显示第一个系列的影像
+            await this.loadFirstImage();
+            
+            // 最终确保loading状态为false
+            this.$store.commit('dicom/SET_LOADING', false);
+            this.localLoading = false;
+            
+            // 清除超时定时器
+            clearTimeout(timeoutId);
           } catch (error) {
-            // console.error('自动加载PATS目录失败:', error);
+            // 发生错误时确保loading状态为false
+            this.$store.commit('dicom/SET_LOADING', false);
+            this.localLoading = false;
+            clearTimeout(timeoutId);
           }
-        }, 2000); // 延迟2秒
+        } else {
+          // 确保loading状态为false
+          this.$store.commit('dicom/SET_LOADING', false);
+          this.localLoading = false;
+          clearTimeout(timeoutId);
+        }
       } catch (error) {
-        // console.error('自动加载PATS目录初始化失败:', error);
+        // 发生错误时确保loading状态为false
+        this.$store.commit('dicom/SET_LOADING', false);
+        this.localLoading = false;
       }
     },
 
@@ -311,7 +344,7 @@ export default {
           }
         } else {
           // 在单视图模式下，正常加载
-          await this.loadCurrentImage();
+        await this.loadCurrentImage();
         }
       } catch (error) {
         errorHandler.handleError(error, 'selectSeries');
@@ -322,8 +355,31 @@ export default {
      * 加载第一张图像
      */
     async loadFirstImage() {
-      if (this.currentImage) {
+      try {
+        // 检查是否有可用的系列
+        const seriesCount = this.$store.state.dicom.dicomSeries.length;
+        if (seriesCount === 0) {
+          // 确保loading状态为false
+          this.$store.commit('dicom/SET_LOADING', false);
+          this.localLoading = false;
+          return;
+        }
+        
+        // 确保第一个系列被选中
+        if (this.$store.state.dicom.activeSeriesIndex !== 0) {
+          this.$store.commit('dicom/SET_ACTIVE_SERIES', 0);
+        }
+        
+        // 加载当前图像
         await this.loadCurrentImage();
+        
+        // 确保loading状态为false
+        this.$store.commit('dicom/SET_LOADING', false);
+        this.localLoading = false;
+      } catch (error) {
+        // 发生错误时确保loading状态为false
+        this.$store.commit('dicom/SET_LOADING', false);
+        this.localLoading = false;
       }
     },
 
@@ -379,11 +435,11 @@ export default {
         const element = this.$refs.dicomViewer;
         
         // 创建stack对象，参考dashboard
-        const stack = {
-          currentImageIdIndex: 0,
-          imageIds
-        };
-        
+          const stack = {
+            currentImageIdIndex: 0,
+            imageIds
+          };
+          
         // 加载第一个图像
         const firstImageId = imageIds[0];
         // console.log('加载第一个图像:', firstImageId);
@@ -1028,7 +1084,8 @@ export default {
       } catch (error) {
         errorHandler.handleError(error, 'previousImage');
       }
-    }
+    },
+
   }
 };
 </script>
@@ -1125,5 +1182,47 @@ body {
   border-radius: 3px;
   z-index: 10;
   pointer-events: none;
+}
+
+// 加载动画样式
+.loading-overlay {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  z-index: 99999 !important;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: white;
+}
+
+.loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top: 4px solid #409EFF;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+.loading-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: #fff;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>

@@ -23,6 +23,8 @@ const state = {
   dicomDict: [],
   // 加载状态
   loading: false,
+  // 加载文本
+  loadingText: '正在加载DICOM文件...',
   // 错误信息
   error: null
 };
@@ -30,6 +32,10 @@ const state = {
 const mutations = {
   SET_LOADING(state, loading) {
     state.loading = loading;
+  },
+
+  SET_LOADING_TEXT(state, text) {
+    state.loadingText = text;
   },
 
   SET_ERROR(state, error) {
@@ -78,7 +84,9 @@ const mutations = {
     state.activeImageIndex = 0;
     state.currentImageIds = [];
     state.dicomDict = [];
-    state.loading = false;
+    // 不重置loading状态，因为可能正在加载中
+    // state.loading = false;
+    // state.loadingText = '正在加载DICOM文件...';
     state.error = null;
   }
 };
@@ -89,6 +97,7 @@ const actions = {
    */
   async loadDicomDirectory({ commit }, directory) {
     commit('SET_LOADING', true);
+    commit('SET_LOADING_TEXT', '正在分析DICOM目录结构...');
     commit('SET_ERROR', null);
     
     try {
@@ -96,9 +105,11 @@ const actions = {
       commit('RESET_STATE');
       commit('SET_CURRENT_DIRECTORY', directory);
 
+      commit('SET_LOADING_TEXT', '正在扫描目录文件...');
       // 获取目录树
       const directoryTree = dicomService.getDirectoryTree(directory);
       
+      commit('SET_LOADING_TEXT', '正在解析DICOM结构...');
       // 智能分析DICOM结构
       const structureAnalysis = dicomService.analyzeDicomStructure(directoryTree);
       
@@ -120,20 +131,22 @@ const actions = {
         }];
       }
 
-
+      commit('SET_LOADING_TEXT', '正在设置系列数据...');
       // 直接使用结构分析结果设置系列数据
       commit('SET_DICOM_SERIES', structureAnalysis.seriesNodes);
       
+      commit('SET_LOADING_TEXT', '正在生成图像缩略图...');
       // 生成缩略图
       const { thumbnails, dicomDict } = await dicomService.generateThumbnailList(structureAnalysis.seriesNodes);
       commit('SET_THUMBNAILS', thumbnails);
       commit('SET_DICOM_DICT', dicomDict);
 
+      commit('SET_LOADING_TEXT', '正在构建目录树...');
       // 构建目录树
       const treeData = await dicomService.buildTree([directoryTree]);
       commit('SET_DIRECTORY_TREE', treeData);
 
-
+      commit('SET_LOADING_TEXT', '正在完成加载...');
       errorHandler.handleSuccess(`DICOM目录加载完成: ${directory}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载DICOM目录失败';

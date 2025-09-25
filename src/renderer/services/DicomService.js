@@ -32,34 +32,27 @@ export class DicomService {
 
     try {
       const items = fs.readdirSync(directory, { withFileTypes: true });
-      console.log(`构建目录树: ${directory}, 找到 ${items.length} 个项目`);
 
       items.forEach((item) => {
         const fullPath = path.join(directory, item.name);
         
         // 过滤掉不需要的文件和目录
         if (this.shouldIgnoreFile(item.name)) {
-          console.log(`忽略文件: ${item.name}`);
           return; // 跳过这个文件/目录
         }
         
         if (item.isDirectory()) {
           // 递归处理目录
-          console.log(`处理子目录: ${item.name}`);
           const subTree = this.getDirectoryTree(fullPath);
           // 只有当子目录包含有效内容时才添加
           if (this.hasDicomFiles(subTree)) {
-            console.log(`添加子目录: ${item.name}, 子节点数量: ${subTree.children.length}`);
             tree.children.push(subTree);
           } else {
-            console.log(`跳过空目录: ${item.name}`);
           }
         } else {
           // 只添加DICOM文件
           const isDicom = this.isDicomFile(fullPath);
-          console.log(`检查文件: ${item.name}, 是DICOM: ${isDicom}`);
           if (isDicom) {
-            console.log(`添加DICOM文件: ${item.name}`);
             tree.children.push({
               name: item.name,
               path: fullPath,
@@ -70,9 +63,7 @@ export class DicomService {
         }
       });
       
-      console.log(`目录 ${directory} 构建完成，子节点数量: ${tree.children.length}`);
     } catch (error) {
-      console.error(`构建目录树失败: ${directory}`, error);
     }
 
     return tree;
@@ -198,40 +189,26 @@ export class DicomService {
    * 智能分析DICOM目录结构
    */
   analyzeDicomStructure(tree) {
-    console.log('=== 开始分析DICOM目录结构 ===');
-    console.log('目录名称:', tree.name);
-    console.log('目录路径:', tree.path);
-    console.log('子节点数量:', tree.children ? tree.children.length : 0);
     
     const maxDepth = this.getMaxDepth(tree);
-    console.log('最大深度:', maxDepth);
 
     // 检查是否为多患者目录
     const isMultiPatient = this.isMultiPatientDirectory(tree);
-    console.log('是否为多患者目录:', isMultiPatient);
     
     if (isMultiPatient) {
-      console.log('=== 检测到多患者目录，开始分析多患者结构 ===');
       const result = this.analyzeMultiPatientStructure(tree);
-      console.log('多患者分析结果:', result);
       return result;
     }
 
     // 单患者目录分析
-    console.log('单患者目录分析');
     const lastTwoLayers = this.getLastTwoLayersStandard(tree);
     if (!lastTwoLayers) {
-      console.error('DICOM数据格式错误，请检查数据格式！');
       return null;
     }
 
-    console.log('图像节点数量:', lastTwoLayers.lastLayer.length);
-    console.log('系列节点数量:', lastTwoLayers.secondLastLayer.length);
 
     // 基于DICOM标签重新分组系列
-    console.log('开始基于DICOM标签分组系列');
     const seriesNodes = this.groupSeriesByDicomTags(lastTwoLayers.lastLayer);
-    console.log('分组后的系列数量:', seriesNodes.length);
     
     const imageNodes = lastTwoLayers.lastLayer; // 图像节点
 
@@ -248,9 +225,7 @@ export class DicomService {
    * 检查是否为多患者目录
    */
   isMultiPatientDirectory(tree) {
-    console.log('检查是否为多患者目录:', tree.name);
     if (!tree.children || tree.children.length === 0) {
-      console.log('没有子节点，不是多患者目录');
       return false;
     }
     
@@ -260,11 +235,9 @@ export class DicomService {
     tree.children.forEach(child => {
       if (!child.isFile && this.hasDicomFiles(child)) {
         patientCount++;
-        console.log('找到患者目录:', child.name);
       }
     });
     
-    console.log('患者目录数量:', patientCount);
     return patientCount > 1;
   }
 
@@ -272,24 +245,16 @@ export class DicomService {
    * 分析多患者结构
    */
   analyzeMultiPatientStructure(tree) {
-    console.log('=== analyzeMultiPatientStructure开始 ===');
-    console.log('根目录:', tree.name);
-    console.log('子目录数量:', tree.children.length);
     
     const patients = [];
     
     tree.children.forEach((patientNode, index) => {
-      console.log(`处理第${index + 1}个患者目录:`, patientNode.name);
-      console.log('是否包含DICOM文件:', this.hasDicomFiles(patientNode));
       
       if (!patientNode.isFile && this.hasDicomFiles(patientNode)) {
-        console.log(`开始分析患者: ${patientNode.name}`);
         // 分析每个患者
         const patientAnalysis = this.analyzeDicomStructure(patientNode);
-        console.log(`患者 ${patientNode.name} 分析结果:`, patientAnalysis);
         
         if (patientAnalysis && patientAnalysis.seriesNodes.length > 0) {
-          console.log(`患者 ${patientNode.name} 系列数量:`, patientAnalysis.seriesNodes.length);
           patients.push({
             patientName: patientNode.name,
             patientPath: patientNode.path,
@@ -299,15 +264,11 @@ export class DicomService {
             maxDepth: patientAnalysis.maxDepth
           });
         } else {
-          console.log(`患者 ${patientNode.name} 没有有效的系列数据`);
         }
       } else {
-        console.log(`跳过患者目录: ${patientNode.name} (不是目录或不包含DICOM文件)`);
       }
     });
 
-    console.log('=== analyzeMultiPatientStructure完成 ===');
-    console.log('有效患者数量:', patients.length);
     
     // 把所有患者的系列合并成一个数组
     const allSeriesNodes = [];
@@ -322,8 +283,6 @@ export class DicomService {
       }
     });
     
-    console.log('合并后的系列总数:', allSeriesNodes.length);
-    console.log('合并后的图像总数:', allImageNodes.length);
     
     return {
       patients,
@@ -340,14 +299,12 @@ export class DicomService {
    * 基于DICOM标签智能分组系列 - 真正的DICOM标准实现
    */
   groupSeriesByDicomTags(imageNodes) {
-    console.log('开始基于DICOM标签分组系列，图像节点数量:', imageNodes.length);
     const seriesMap = new Map();
     
     imageNodes.forEach((imageNode, index) => {
       if (!imageNode.isFile) return;
       
       try {
-        // console.log(`解析第${index + 1}个DICOM文件:`, imageNode.path);
         // 解析DICOM文件获取关键标签
         const dicomData = this.parseDicomFile(imageNode.path);
         if (dicomData) {
@@ -356,7 +313,6 @@ export class DicomService {
           const patientID = dicomData.find(tag => tag.tag === '00100020')?.value;
           const patientName = dicomData.find(tag => tag.tag === '00100010')?.value;
           
-          // console.log('解析到的Series Instance UID:', seriesInstanceUID);
           
           if (seriesInstanceUID) {
             if (!seriesMap.has(seriesInstanceUID)) {
@@ -366,7 +322,6 @@ export class DicomService {
               const seriesNumber = dicomData.find(tag => tag.tag === '00200011')?.value || 'Unknown';
               const studyDate = dicomData.find(tag => tag.tag === '00080020')?.value || 'Unknown';
               
-              console.log('创建新系列:', `${seriesNumber}: ${seriesDescription}`);
               
               seriesMap.set(seriesInstanceUID, {
                 name: `${seriesNumber}: ${seriesDescription}`,
@@ -391,10 +346,8 @@ export class DicomService {
             series.imageCount++;
           }
         } else {
-          console.log('无法解析DICOM文件:', imageNode.path);
         }
       } catch (error) {
-        console.error('解析DICOM文件出错:', imageNode.path, error);
       }
     });
     
@@ -405,7 +358,6 @@ export class DicomService {
       return aNum - bNum;
     });
     
-    console.log('分组完成，系列数量:', result.length);
     return result;
   }
 
@@ -414,7 +366,6 @@ export class DicomService {
    */
   parseDicomFile(filePath) {
     try {
-      console.log('开始解析DICOM文件:', filePath);
       const fileBuffer = fs.readFileSync(filePath);
       const dicomData = dicomParser.parseDicom(fileBuffer);
       const elements = [];
@@ -446,7 +397,6 @@ export class DicomService {
       ];
       
       // 移除详细调试日志以提升性能
-      // console.log('DICOM文件elements总数:', Object.keys(dicomData.elements).length);
       
       // 尝试提取标签，支持带x前缀和不带x前缀的格式
       const allTags = [...tags, ...tagsWithoutX];
@@ -468,10 +418,8 @@ export class DicomService {
         }
       });
       
-      // console.log('DICOM文件解析成功，提取到', elements.length, '个标签');
       return elements;
     } catch (error) {
-      console.error('解析DICOM文件失败:', filePath, error);
       return null;
     }
   }
@@ -484,7 +432,6 @@ export class DicomService {
     // 从根节点开始遍历，初始深度为树的高度
     const maxDepth = this.getMaxDepth(tree);
     
-    console.log('getLastTwoLayersStandard开始，最大深度:', maxDepth);
     
     if (maxDepth < 2 || maxDepth > 4) {
       console.warn(`DICOM数据格式错误，深度为${maxDepth}，期望2-4层！`);
@@ -493,14 +440,12 @@ export class DicomService {
     
     // 递归函数 - 完全按照dashboard的逻辑
     function traverse(node, depth) {
-      console.log(`遍历节点: ${node.name}, 深度: ${depth}, 是文件: ${node.isFile}, 子节点数量: ${node.children ? node.children.length : 0}`);
       
       // 根据最大深度和当前深度判断节点类型
       if (maxDepth === 2) {
         // 2层结构：PAT-IMG（单文件系列）
         if (depth === 0 && node.isFile) {
           // 最底层：图像文件，同时也是系列
-          console.log(`2层结构-添加图像节点: ${node.name}`);
           result.lastLayer.push(node);
           result.secondLastLayer.push(node);
         }
@@ -508,40 +453,33 @@ export class DicomService {
         // 3层结构：PAT-STUDY-IMG (单系列)
         if (depth === 0 && node.isFile) {
           // 最底层：图像文件
-          console.log(`3层结构-添加图像节点: ${node.name}`);
           result.lastLayer.push(node);
         } else if (depth === 2) {
           // 研究层：直接包含图像，也是系列层
-          console.log(`3层结构-添加系列节点: ${node.name}`);
           result.secondLastLayer.push(node);
         }
       } else if (maxDepth === 4) {
         // 4层结构：PAT-STD-SER-IMG
         if (depth === 0 && node.isFile) {
           // 最底层：图像文件
-          console.log(`4层结构-添加图像节点: ${node.name}`);
           result.lastLayer.push(node);
         } else if (depth === 2) {
           // 系列层：包含图像的目录
-          console.log(`4层结构-添加系列节点: ${node.name}`);
           result.secondLastLayer.push(node);
         }
       }
 
       if (node.children && node.children.length > 0) {
-        console.log(`节点 ${node.name} 有 ${node.children.length} 个子节点，继续遍历，深度从 ${depth} 到 ${depth - 1}`);
         node.children.forEach(child => {
           traverse(child, depth - 1);
         });
       } else {
-        console.log(`节点 ${node.name} 没有子节点，停止遍历`);
       }
     }
     
     // 从根节点开始遍历，初始深度为最大深度
     traverse(tree, maxDepth);
 
-    console.log('getLastTwoLayersStandard完成，图像数量:', result.lastLayer.length, '系列数量:', result.secondLastLayer.length);
     return result;
   }
 

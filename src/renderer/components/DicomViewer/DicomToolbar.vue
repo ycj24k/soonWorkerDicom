@@ -153,8 +153,8 @@
           <div 
             @click="$emit('invert-image')" 
             class="action_btn" 
-            :class="{ 'action_btn1': actionClick === 10 }"
-            @mousedown="actionClick = 10" 
+            :class="{ 'action_btn1': actionClick === 24 }"
+            @mousedown="actionClick = 24" 
             @mouseup="actionClick = 0"
           >
             <img class="action_img" src="@/assets/images/action10.png" />
