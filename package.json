@@ -61,7 +61,6 @@
     "archiver": "^7.0.1",
     "archiver-zip-encrypted": "^2.0.0",
     "axios": "^0.18.0",
-    "canvas": "^2.11.2",
     "core-js": "3",
     "cornerstone-core": "^2.6.1",
     "cornerstone-math": "^0.1.10",
