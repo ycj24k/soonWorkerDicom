@@ -169,14 +169,16 @@ const actions = {
       commit('RESET_STATE');
       commit('SET_CURRENT_DIRECTORY', filePath);
 
-      // 创建单文件树结构
-      const fileName = require('path').basename(filePath);
+      // 创建单文件树结构 - 标准化路径
+      const path = require('path');
+      const normalizedFilePath = path.normalize(filePath);
+      const fileName = path.basename(normalizedFilePath);
       const directoryTree = {
         name: fileName,
-        path: filePath,
+        path: normalizedFilePath,
         children: [{
           name: fileName,
-          path: filePath,
+          path: normalizedFilePath,
           isFile: true,
           children: []
         }]
@@ -192,10 +194,10 @@ const actions = {
       // 创建单序列结构
       const singleSeries = {
         name: fileName,
-        path: filePath,
+        path: normalizedFilePath,
         children: [{
           name: fileName,
-          path: filePath,
+          path: normalizedFilePath,
           isFile: true,
           children: []
         }]

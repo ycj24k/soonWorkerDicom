@@ -83,6 +83,7 @@ import GridLayoutSelector from './GridLayoutSelector.vue';
 import PlaybackControlDialog from './PlaybackControlDialog.vue';
 import ImageInfo from '../../views/dashboard/components/image-info.vue';
 import { cornerstoneService, gridViewService, playbackService, errorHandler } from '../../services';
+import PathUtils from '../../utils/PathUtils';
 // 移除已删除的工具类引用
 
 const { ipcRenderer } = require('electron');
@@ -205,10 +206,10 @@ export default {
         const path = require('path');
         const fs = require('fs');
         
-        // 加载DICOM目录
-        const dicomPath = path.join(process.cwd(), 'DICOM');
+        // 加载DICOM目录 - 使用跨平台路径工具
+        const dicomPath = PathUtils.findDicomDirectory();
         
-        if (fs.existsSync(dicomPath)) {
+        if (dicomPath) {
           try {
             await this.loadDicomDirectory(dicomPath);
             
@@ -692,8 +693,8 @@ export default {
       if (process.env.NODE_ENV === 'development') {
         return 'static/cursors/' + filename;
       } else {
-        const path = require('path');
-        return path.join(process.resourcesPath, 'cursors', filename);
+        // 使用跨平台路径工具
+        return PathUtils.getResourcePath(path.join('cursors', filename));
       }
     },
 

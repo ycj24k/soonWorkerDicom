@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { Notification } = require('element-ui');
 const dicomParser = require('dicom-parser');
+import PathUtils from '../utils/PathUtils';
 
 export class DicomService {
   constructor() {
@@ -21,20 +22,36 @@ export class DicomService {
   }
 
   /**
+   * 标准化文件路径，确保跨平台兼容性
+   */
+  normalizePath(filePath) {
+    return PathUtils.normalizePath(filePath);
+  }
+
+  /**
+   * 检查文件是否存在，支持跨平台路径
+   */
+  fileExists(filePath) {
+    return PathUtils.fileExists(filePath);
+  }
+
+  /**
    * 获取目录树结构
    */
   getDirectoryTree(directory) {
+    // 标准化路径，确保跨平台兼容性
+    const normalizedDirectory = this.normalizePath(directory);
     const tree = {
-      name: path.basename(directory),
-      path: directory,
+      name: path.basename(normalizedDirectory),
+      path: normalizedDirectory,
       children: []
     };
 
     try {
-      const items = fs.readdirSync(directory, { withFileTypes: true });
+      const items = fs.readdirSync(normalizedDirectory, { withFileTypes: true });
 
       items.forEach((item) => {
-        const fullPath = path.join(directory, item.name);
+        const fullPath = path.join(normalizedDirectory, item.name);
         
         // 过滤掉不需要的文件和目录
         if (this.shouldIgnoreFile(item.name)) {
@@ -123,8 +140,9 @@ export class DicomService {
    */
   isDicomFile(filename) {
     try {
-      const filePath = path.resolve(filename);
-      const fileName = path.basename(filename);
+      // 标准化路径，确保跨平台兼容性
+      const filePath = this.normalizePath(filename);
+      const fileName = path.basename(filePath);
       
       // 过滤隐藏文件和系统文件
       if (this.shouldIgnoreFile(fileName)) {
@@ -325,7 +343,7 @@ export class DicomService {
               
               seriesMap.set(seriesInstanceUID, {
                 name: `${seriesNumber}: ${seriesDescription}`,
-                path: path.dirname(imageNode.path),
+                path: path.normalize(path.dirname(imageNode.path)),
                 children: [],
                 isFile: false,
                 seriesInstanceUID: seriesInstanceUID,
