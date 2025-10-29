@@ -22,7 +22,6 @@
       @clear-measurements="clearMeasurements"
       @show-image-info="showImageInfo"
       @toggle-grid-layout="toggleGridLayout"
-      @toggle-playback="togglePlayback"
     />
 
     <!-- 主内容区 -->
@@ -40,6 +39,65 @@
       >
         <!-- 图像信息覆盖层 -->
         <DicomImageInfo />
+        
+        <!-- 动态影像播放控制 -->
+        <div v-if="isDynamicSeries && cineInfo && currentPlayingState" class="playback-controls">
+          <div class="playback-info">
+            <span class="playback-status">动态影像帧播放中 ({{ cineInfo.type }})</span>
+            <span class="playback-speed">{{ cineInfo.frameCount }} 帧</span>
+          </div>
+          <div class="playback-buttons">
+            <el-button 
+              size="mini" 
+              icon="el-icon-video-pause" 
+              @click="pauseCinePlayback"
+              v-if="!isPausedState"
+            >暂停</el-button>
+            <el-button 
+              size="mini" 
+              icon="el-icon-video-play" 
+              @click="resumeCinePlayback"
+              v-if="isPausedState"
+            >继续</el-button>
+            <el-button 
+              size="mini" 
+              icon="el-icon-video-close" 
+              @click="stopCinePlayback"
+            >停止</el-button>
+            <el-button 
+              size="mini" 
+              icon="el-icon-setting" 
+              @click="showCineSettings"
+            >设置</el-button>
+      </div>
+    </div>
+        
+        <!-- 普通影像播放控制 -->
+        <div v-if="!isDynamicSeries && currentPlayingState" class="playback-controls">
+          <div class="playback-info">
+            <span class="playback-status">单张影像播放中</span>
+            <span class="playback-speed">{{ currentImageIds ? currentImageIds.length : 0 }} 张</span>
+          </div>
+          <div class="playback-buttons">
+            <el-button 
+              size="mini" 
+              icon="el-icon-video-pause" 
+              @click="pausePlayback"
+              v-if="!isPausedState"
+            >暂停</el-button>
+            <el-button 
+              size="mini" 
+              icon="el-icon-video-play" 
+              @click="resumePlayback"
+              v-if="isPausedState"
+            >继续</el-button>
+            <el-button 
+              size="mini" 
+              icon="el-icon-video-close" 
+              @click="stopPlayback"
+            >停止</el-button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -56,6 +114,7 @@
       ref="playbackControlDialog"
       :show="showPlaybackDialog"
       :total-frames="currentImageIds.length"
+      :is-dynamic-series="isDynamicSeries"
       @start-playback="startPlayback"
       @close="closePlaybackDialog"
     />
@@ -84,6 +143,8 @@ import PlaybackControlDialog from './PlaybackControlDialog.vue';
 import ImageInfo from '../../views/dashboard/components/image-info.vue';
 import { cornerstoneService, gridViewService, playbackService, errorHandler } from '../../services';
 import PathUtils from '../../utils/PathUtils';
+const { ConfigManager } = require('../../utils/ConfigManager');
+const cinePlaybackService = require('../../services/CinePlaybackService');
 // 移除已删除的工具类引用
 
 const { ipcRenderer } = require('electron');
@@ -120,10 +181,29 @@ export default {
     };
   },
   computed: {
-    ...mapState('dicom', ['loading', 'loadingText', 'error']),
+    ...mapState('dicom', ['loading', 'loadingText', 'error', 'isDynamicSeries', 'cineInfo', 'currentCineImagePath']),
     ...mapState('viewer', ['toolState']),
     ...mapGetters('dicom', ['currentImage', 'currentImageIds']),
-    ...mapGetters('viewer', ['isGridViewActive', 'currentGridLayout', 'selectedGridViewport', 'isPlaying', 'playbackSpeed']),
+    ...mapGetters('viewer', ['isGridViewActive', 'currentGridLayout', 'selectedGridViewport', 'isPlaying', 'isPaused', 'playbackSpeed']),
+    
+    // 播放状态计算
+    isPausedState() {
+      // 优先检查动态影像播放状态
+      if (this.isDynamicSeries && this.cineInfo) {
+        return cinePlaybackService.isPaused();
+      }
+      // 否则使用Vuex中的暂停状态
+      return this.isPaused;
+    },
+    
+    // 当前播放状态
+    currentPlayingState() {
+      if (this.isDynamicSeries && this.cineInfo) {
+        return cinePlaybackService.isPlaying();
+      }
+      return this.isPlaying;
+    },
+
     
     // 鼠标样式计算
     currentCursor() {
@@ -142,6 +222,12 @@ export default {
     this.setupKeyboardShortcuts();
     // 等待一个微任务周期，确保Cornerstone初始化完成
     await this.$nextTick();
+    
+    // 在自动加载前显示加载动画
+    this.$store.commit('dicom/SET_LOADING', true);
+    this.$store.commit('dicom/SET_LOADING_TEXT', '正在初始化应用程序...');
+    this.localLoading = true;
+    
     // 自动加载DICOM目录
     this.autoLoadDicomDirectory();
   },
@@ -152,6 +238,7 @@ export default {
   methods: {
     ...mapActions('dicom', [
       'loadDicomDirectory', 
+      'loadDicomFile',
       'selectDicomSeries', 
       'selectImage'
     ]),
@@ -178,17 +265,12 @@ export default {
      */
     initializeViewer() {
       try {
-        // console.log('initializeViewer方法被调用');
-        // console.log('this.$refs.dicomViewer:', this.$refs.dicomViewer);
-        // console.log('初始化DICOM查看器');
         ipcRenderer.send('maximize-window');
         
         // 使用改进后的服务类
-        // console.log('准备调用cornerstoneService.enableElement...');
         cornerstoneService.enableElement(this.$refs.dicomViewer);
-        // console.log('DICOM查看器初始化完成');
       } catch (error) {
-        // console.error('初始化查看器失败', error);
+        console.error('初始化查看器失败', error);
       }
     },
 
@@ -203,38 +285,61 @@ export default {
           this.localLoading = false;
         }, 30000); // 30秒超时
         
-        const path = require('path');
-        const fs = require('fs');
+        // 确保UI更新后再执行配置读取操作
+        await this.$nextTick();
         
-        // 加载DICOM目录 - 使用跨平台路径工具
-        const dicomPath = PathUtils.findDicomDirectory();
-        
-        if (dicomPath) {
+        // 使用setTimeout确保UI完全更新后再执行配置操作
+        setTimeout(async () => {
           try {
-            await this.loadDicomDirectory(dicomPath);
+            const path = require('path');
+            const fs = require('fs');
             
-            // 加载完成后显示第一个系列的影像
-            await this.loadFirstImage();
-            
-            // 最终确保loading状态为false
-            this.$store.commit('dicom/SET_LOADING', false);
-            this.localLoading = false;
-            
-            // 清除超时定时器
-            clearTimeout(timeoutId);
+            // 加载DICOM目录 - 使用配置文件管理器
+            const configManager = ConfigManager.getInstance();
+            const config = configManager.getConfig();
+            const dicomPath = configManager.findAvailableDicomDirectory();
+            const isAutoLoadEnabled = configManager.isAutoLoadEnabled();
+        
+            if (dicomPath && isAutoLoadEnabled) {
+              // 更新加载文本（loading状态已在mounted中设置）
+              this.$store.commit('dicom/SET_LOADING_TEXT', '正在扫描DICOM目录...');
+              
+              try {
+                await this.loadDicomDirectory(dicomPath);
+                
+                // 加载完成后显示第一个系列的影像
+                this.$store.commit('dicom/SET_LOADING_TEXT', '正在加载第一个影像...');
+                await this.loadFirstImage();
+                
+                // 最终确保loading状态为false
+                this.$store.commit('dicom/SET_LOADING', false);
+                this.localLoading = false;
+                
+                // 清除超时定时器
+                clearTimeout(timeoutId);
+              } catch (error) {
+                console.error('加载DICOM目录失败:', error);
+                // 发生错误时确保loading状态为false
+                this.$store.commit('dicom/SET_LOADING', false);
+                this.localLoading = false;
+                clearTimeout(timeoutId);
+              }
+            } else {
+              // 确保loading状态为false
+              this.$store.commit('dicom/SET_LOADING', false);
+              this.localLoading = false;
+              clearTimeout(timeoutId);
+            }
           } catch (error) {
+            console.error('配置读取过程发生错误:', error);
             // 发生错误时确保loading状态为false
             this.$store.commit('dicom/SET_LOADING', false);
             this.localLoading = false;
             clearTimeout(timeoutId);
           }
-        } else {
-          // 确保loading状态为false
-          this.$store.commit('dicom/SET_LOADING', false);
-          this.localLoading = false;
-          clearTimeout(timeoutId);
-        }
+        }, 50); // 50ms延迟确保UI完全更新
       } catch (error) {
+        console.error('自动加载过程发生错误:', error);
         // 发生错误时确保loading状态为false
         this.$store.commit('dicom/SET_LOADING', false);
         this.localLoading = false;
@@ -286,21 +391,45 @@ export default {
           const fs = require('fs');
           const path = require('path');
           
-          // 检查选择的是文件还是目录
-          const stats = fs.statSync(selectedPath);
-          if (stats.isFile()) {
-            // 选择的是单个文件
-            // console.log(`选择单个DICOM文件: ${selectedPath}`);
-            await this.loadDicomFile(selectedPath);
-          } else {
-            // 选择的是目录
-            // console.log(`选择DICOM目录: ${selectedPath}`);
-            await this.loadDicomDirectory(selectedPath);
-          }
+          // 立即显示加载动画 - 在文件对话框选择完成后立即显示
+          this.$store.commit('dicom/SET_LOADING', true);
+          this.$store.commit('dicom/SET_LOADING_TEXT', '正在分析选择的文件...');
+          this.localLoading = true;
           
+          // 强制立即更新UI，然后异步执行文件检查
+          await this.$nextTick();
+          
+          // 使用setTimeout确保UI完全更新后再执行文件操作
+          setTimeout(async () => {
+            try {
+              // 检查选择的是文件还是目录
+              this.$store.commit('dicom/SET_LOADING_TEXT', '正在检查文件类型...');
+              const stats = fs.statSync(selectedPath);
+              
+              if (stats.isFile()) {
+                // 选择的是单个文件
+                this.$store.commit('dicom/SET_LOADING_TEXT', '正在解析DICOM文件...');
+                await this.loadDicomFile(selectedPath);
+              } else {
+                // 选择的是目录
+                this.$store.commit('dicom/SET_LOADING_TEXT', '正在扫描DICOM目录...');
+                await this.loadDicomDirectory(selectedPath);
+              }
+              
+              this.$store.commit('dicom/SET_LOADING_TEXT', '正在加载第一个影像...');
           await this.loadFirstImage();
+            } catch (error) {
+              // 加载失败时确保隐藏加载动画
+              this.$store.commit('dicom/SET_LOADING', false);
+              this.localLoading = false;
+              throw error;
+            }
+          }, 50); // 50ms延迟确保UI完全更新
         }
       } catch (error) {
+        // 确保在错误时也隐藏加载动画
+        this.$store.commit('dicom/SET_LOADING', false);
+        this.localLoading = false;
         errorHandler.handleError(error, 'selectPath');
       }
     },
@@ -319,11 +448,32 @@ export default {
         });
         
         if (result.filePaths[0]) {
-          // console.log(`选择单个DICOM文件: ${result.filePaths[0]}`);
-          await this.loadDicomFile(result.filePaths[0]);
-          await this.loadFirstImage();
+          
+          // 立即显示加载动画 - 在文件对话框选择完成后立即显示
+          this.$store.commit('dicom/SET_LOADING', true);
+          this.$store.commit('dicom/SET_LOADING_TEXT', '正在解析DICOM文件...');
+          this.localLoading = true;
+          
+          // 强制立即更新UI，然后异步执行文件加载
+          await this.$nextTick();
+          
+          // 使用setTimeout确保UI完全更新后再执行文件操作
+          setTimeout(async () => {
+            try {
+              await this.loadDicomFile(result.filePaths[0]);
+              
+              this.$store.commit('dicom/SET_LOADING_TEXT', '正在加载第一个影像...');
+              await this.loadFirstImage();
+            } catch (error) {
+              // 加载失败时确保隐藏加载动画
+              this.$store.commit('dicom/SET_LOADING', false);
+              this.localLoading = false;
+              throw error;
+            }
+          }, 50); // 50ms延迟确保UI完全更新
         }
       } catch (error) {
+        console.error('选择文件失败:', error);
         errorHandler.handleError(error, 'selectFile');
       }
     },
@@ -374,13 +524,156 @@ export default {
         // 加载当前图像
         await this.loadCurrentImage();
         
+        // 检查是否为动态影像，如果是则显示动态播放选项
+        const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
+        const cineInfo = this.$store.state.dicom.cineInfo;
+        const currentCineImagePath = this.$store.state.dicom.currentCineImagePath;
+        
+        if (isDynamicSeries && cineInfo && currentCineImagePath) {
+          // 显示动态影像提示，但不自动播放
+          this.$message({
+            message: `检测到动态影像 (${cineInfo.frameCount}帧)，可使用播放控制进行帧播放`,
+            type: 'info',
+            duration: 3000
+          });
+        }
+        
         // 确保loading状态为false
         this.$store.commit('dicom/SET_LOADING', false);
         this.localLoading = false;
       } catch (error) {
+        console.error('加载第一个图像失败:', error);
         // 发生错误时确保loading状态为false
         this.$store.commit('dicom/SET_LOADING', false);
         this.localLoading = false;
+      }
+    },
+
+    /**
+     * 开始真正的动态影像播放
+     */
+    async startCinePlayback() {
+      try {
+        
+        const cineInfo = this.$store.state.dicom.cineInfo;
+        const currentCineImagePath = this.$store.state.dicom.currentCineImagePath;
+        
+        if (!cineInfo || !currentCineImagePath) {
+          console.error('动态影像信息不完整');
+          return;
+        }
+
+        const element = this.$refs.dicomViewer;
+        if (!element) {
+          console.error('找不到DICOM查看器元素');
+          return;
+        }
+
+        // 确保图像加载器已注册
+        await this.$cornerstoneService.ensureImageLoaderRegistered();
+        
+        // 构建图像ID
+        const imageId = `wadouri:${currentCineImagePath}`;
+        
+
+        // 开始动态影像播放
+        cinePlaybackService.startCinePlayback(element, imageId, cineInfo, {
+          speed: 10, // 默认速度
+          direction: 'forward'
+        });
+        
+        // 更新Vuex状态
+        this.$store.dispatch('viewer/startPlayback');
+        
+        
+        // 显示播放控制提示
+        this.$message({
+          message: `动态影像播放已开始 (${cineInfo.frameCount}帧, ${cineInfo.type})`,
+          type: 'success',
+          duration: 3000
+        });
+        
+      } catch (error) {
+        console.error('动态影像播放失败:', error);
+        errorHandler.handleError(error, 'startCinePlayback');
+      }
+    },
+
+    /**
+     * 自动开始播放动态影像（旧的逻辑，保留兼容性）
+     */
+    async startAutoPlayback() {
+      try {
+        
+        const currentSeries = this.$store.getters['dicom/currentSeries'];
+        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
+          console.error('没有可用的图像');
+          return;
+        }
+
+        // 构建图像ID列表
+        const imageIds = [];
+        const findDicomFiles = (node) => {
+          console.log('🔍 检查节点:', {
+            name: node.name,
+            isFile: node.isFile,
+            fullPath: node.fullPath,
+            path: node.path
+          });
+          
+          if (node.isFile && this.isDicomFile(node.name)) {
+            // 使用新的buildImageId方法，支持帧图像
+            const imageId = this.buildImageId(node);
+            if (imageId) {
+              imageIds.push(imageId);
+              console.log('✅ 添加图像ID:', imageId);
+            } else {
+              console.error('节点没有有效路径:', node);
+            }
+          } else if (node.children) {
+            node.children.forEach(child => findDicomFiles(child));
+          }
+        };
+        findDicomFiles(currentSeries);
+
+        if (imageIds.length === 0) {
+          console.error('没有找到DICOM图像');
+          return;
+        }
+
+        console.log('🎬 找到动态影像数量:', imageIds.length);
+
+        // 设置播放参数（适合动态影像的默认参数）
+        const playbackOptions = {
+          speed: 8, // 较慢的速度，适合医学影像观察
+          direction: 'forward',
+          loop: true,
+          startFrame: 0,
+          endFrame: imageIds.length - 1
+        };
+
+        const element = this.$refs.dicomViewer;
+        if (!element) {
+          console.error('找不到DICOM查看器元素');
+          return;
+        }
+
+        await this.$cornerstoneService.ensureImageLoaderRegistered();
+        playbackService.startPlayback(element, imageIds, playbackOptions);
+        this.$store.dispatch('viewer/startPlayback');
+        
+        console.log('✅ 动态影像自动播放已开始');
+        
+        // 显示播放控制提示
+        this.$message({
+          message: `动态影像自动播放已开始 (${imageIds.length}帧)`,
+          type: 'success',
+          duration: 3000
+        });
+        
+      } catch (error) {
+        console.error('自动播放失败:', error);
+        errorHandler.handleError(error, 'startAutoPlayback');
       }
     },
 
@@ -417,8 +710,16 @@ export default {
                                (node.name.match(/^IMG\d+$/) && node.path.includes('SER'));
             
             if (isDicomFile) {
-              imageIds.push(`wadouri:${node.path}`);
-              // console.log(`找到DICOM文件: ${node.name} -> wadouri:${node.path}`);
+              // 创建临时节点对象来使用buildImageId方法
+              const tempNode = {
+                isFile: true,
+                path: node.path,
+                fullPath: node.path,
+                isFrame: false
+              };
+              const imageId = this.buildImageId(tempNode);
+              imageIds.push(imageId);
+              // console.log(`找到DICOM文件: ${node.name} -> ${imageId}`);
             }
           } else if (node.children) {
             node.children.forEach(child => findDicomFiles(child));
@@ -861,7 +1162,7 @@ export default {
           if (viewport && series && series.children.length > 0) {
             // 获取系列的第一张图像
             const firstImage = series.children[0];
-            const imageId = `wadouri:${firstImage.path}`;
+            const imageId = this.buildImageId(firstImage);
             
             // console.log(`加载系列 ${i} 到视口 ${i}:`, series.name);
             
@@ -957,19 +1258,43 @@ export default {
     },
 
     /**
-     * 切换播放控制
+     * 切换播放控制 - 完全重新设计
      */
     togglePlayback() {
-      if (playbackService.isPlaying()) {
-        // 如果正在播放，则暂停
-        playbackService.pausePlayback();
-        this.$store.dispatch('viewer/stopPlayback');
-      } else if (this.$store.state.viewer.playbackControl.isPlaying) {
-        // 如果已暂停，则恢复播放
-        playbackService.resumePlayback(this.$refs.dicomViewer, this.currentImageIds);
-        this.$store.dispatch('viewer/startPlayback');
+      
+      // 检查是否为动态影像
+      const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
+      
+      // 所有影像都可以单张播放，动态影像额外支持帧播放
+      if (isDynamicSeries) {
+        // 动态影像：可以选择单张播放或帧播放
+        const cineInfo = this.$store.state.dicom.cineInfo;
+        if (cineInfo) {
+          this.$message({
+            message: `检测到动态影像 (${cineInfo.frameCount}帧)，将播放所有图像文件`,
+            type: 'info',
+            duration: 2000
+          });
+        }
+      }
+
+      // 获取当前状态
+      const isPlaying = playbackService.isPlaying();
+      const isPaused = playbackService.isPaused();
+      const dialogOpen = this.showPlaybackDialog;
+      
+      // 状态处理逻辑
+      if (dialogOpen) {
+        // 情况1: 对话框已打开 -> 关闭对话框
+        this.closePlaybackDialog();
+      } else if (isPlaying) {
+        // 情况2: 正在播放 -> 暂停播放
+        this.pausePlayback();
+      } else if (isPaused) {
+        // 情况3: 已暂停 -> 恢复播放
+        this.resumePlayback();
       } else {
-        // 如果未播放，则显示播放设置对话框
+        // 情况4: 未播放或已停止 -> 显示播放对话框
         this.showPlaybackDialog = true;
       }
     },
@@ -979,12 +1304,62 @@ export default {
      */
     async startPlayback(playbackOptions) {
       try {
+        
+        // 检查是否为动态影像且选择了帧播放模式
+        const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
+        const cineInfo = this.$store.state.dicom.cineInfo;
+        const currentCineImagePath = this.$store.state.dicom.currentCineImagePath;
+        
+        if (isDynamicSeries && cineInfo && currentCineImagePath && playbackOptions.mode === 'frame') {
+          // 启动动态影像帧播放
+          await this.startCinePlayback();
+          this.closePlaybackDialog();
+          return;
+        }
+        
+        // 普通单张播放（包括动态影像的单张播放模式）
+        const currentSeries = this.$store.getters['dicom/currentSeries'];
+        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
+          console.error('没有可用的图像');
+          this.$message.error('没有可用的图像');
+          this.closePlaybackDialog();
+          return;
+        }
+
+        // 构建图像ID列表
+        const imageIds = [];
+        const findDicomFiles = (node) => {
+          if (node.isFile && this.isDicomFile(node.name)) {
+            // 使用新的buildImageId方法，支持帧图像
+            const imageId = this.buildImageId(node);
+            if (imageId) {
+              imageIds.push(imageId);
+            } else {
+              console.error('节点没有有效路径:', node);
+            }
+          } else if (node.children) {
+            node.children.forEach(child => findDicomFiles(child));
+          }
+        };
+        
+        findDicomFiles(currentSeries);
+        
+        if (imageIds.length === 0) {
+          console.error('没有找到DICOM图像');
+          this.$message.error('没有找到DICOM图像');
+          this.closePlaybackDialog();
+          return;
+        }
+
+        console.log('🎬 找到图像数量:', imageIds.length);
+
         const element = this.$refs.dicomViewer;
-        playbackService.setPlaybackSpeed(playbackOptions.speed);
-        playbackService.setPlaybackDirection(playbackOptions.direction);
+        
+        // 确保图像加载器已注册
+        await this.$cornerstoneService.ensureImageLoaderRegistered();
         
         // 开始播放
-        playbackService.startPlayback(element, this.currentImageIds, {
+        playbackService.startPlayback(element, imageIds, {
           speed: playbackOptions.speed,
           direction: playbackOptions.direction,
           startFrame: playbackOptions.startFrame,
@@ -992,10 +1367,78 @@ export default {
           loop: playbackOptions.loop
         });
 
-        await this.$store.dispatch('viewer/startPlayback'); // 更新状态
+        // 更新Vuex状态
+        this.$store.dispatch('viewer/startPlayback');
+        
+        // 关闭对话框
         this.closePlaybackDialog();
+        
       } catch (error) {
+        console.error('开始播放失败:', error);
         errorHandler.handleError(error, 'startPlayback');
+        this.$message.error('播放启动失败');
+        this.closePlaybackDialog();
+      }
+    },
+
+    /**
+     * 暂停播放
+     */
+    pausePlayback() {
+      try {
+        playbackService.pausePlayback();
+        // 暂停时不调用stopPlayback，保持播放状态但标记为暂停
+        this.$store.dispatch('viewer/pausePlayback');
+      } catch (error) {
+        console.error('暂停播放失败:', error);
+        errorHandler.handleError(error, 'pausePlayback');
+      }
+    },
+
+    /**
+     * 恢复播放
+     */
+    resumePlayback() {
+      try {
+        // 获取当前图像ID列表
+        const currentSeries = this.$store.getters['dicom/currentSeries'];
+        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
+          console.error('没有可用的图像');
+          this.$message.error('没有可用的图像');
+          return;
+        }
+
+        // 构建图像ID列表
+        const imageIds = [];
+        const findDicomFiles = (node) => {
+          if (node.isFile && this.isDicomFile(node.name)) {
+            // 使用新的buildImageId方法，支持帧图像
+            const imageId = this.buildImageId(node);
+            if (imageId) {
+              imageIds.push(imageId);
+            } else {
+              console.error('节点没有有效路径:', node);
+            }
+          } else if (node.children) {
+            node.children.forEach(child => findDicomFiles(child));
+          }
+        };
+        
+        findDicomFiles(currentSeries);
+        
+        if (imageIds.length === 0) {
+          console.error('没有找到DICOM图像');
+          this.$message.error('没有找到DICOM图像');
+          return;
+        }
+
+        const element = this.$refs.dicomViewer;
+        playbackService.resumePlayback(element, imageIds);
+        this.$store.dispatch('viewer/startPlayback');
+        
+      } catch (error) {
+        console.error('恢复播放失败:', error);
+        errorHandler.handleError(error, 'resumePlayback');
       }
     },
 
@@ -1084,6 +1527,96 @@ export default {
         await this.loadCurrentImage();
       } catch (error) {
         errorHandler.handleError(error, 'previousImage');
+      }
+    },
+
+    /**
+     * 暂停动态影像播放
+     */
+    pauseCinePlayback() {
+      try {
+        cinePlaybackService.pauseCinePlayback();
+        // 暂停时不调用stopPlayback，保持播放状态但标记为暂停
+        this.$store.dispatch('viewer/pausePlayback');
+      } catch (error) {
+        console.error('暂停动态影像播放失败:', error);
+        errorHandler.handleError(error, 'pauseCinePlayback');
+      }
+    },
+
+    /**
+     * 恢复动态影像播放
+     */
+    resumeCinePlayback() {
+      try {
+        cinePlaybackService.resumeCinePlayback();
+        this.$store.dispatch('viewer/startPlayback');
+      } catch (error) {
+        console.error('恢复动态影像播放失败:', error);
+        errorHandler.handleError(error, 'resumeCinePlayback');
+      }
+    },
+
+    /**
+     * 停止动态影像播放
+     */
+    stopCinePlayback() {
+      try {
+        cinePlaybackService.stopCinePlayback();
+        this.$store.dispatch('viewer/stopPlayback');
+      } catch (error) {
+        console.error('停止动态影像播放失败:', error);
+        errorHandler.handleError(error, 'stopCinePlayback');
+      }
+    },
+
+    /**
+     * 停止普通播放
+     */
+    stopPlayback() {
+      try {
+        playbackService.stopPlayback();
+        this.$store.dispatch('viewer/stopPlayback');
+        // 重置对话框状态，确保下次点击可以显示对话框
+        this.showPlaybackDialog = false;
+      } catch (error) {
+        console.error('停止播放失败:', error);
+        errorHandler.handleError(error, 'stopPlayback');
+      }
+    },
+
+    /**
+     * 显示动态影像设置
+     */
+    showCineSettings() {
+      const frameInfo = cinePlaybackService.getCurrentFrameInfo();
+      this.$message({
+        message: `当前帧: ${frameInfo.currentFrame + 1}/${frameInfo.totalFrames}, 速度: ${frameInfo.speed} FPS`,
+        type: 'info',
+        duration: 2000
+      });
+    },
+
+    /**
+     * 检测是否为DICOM文件
+     */
+    isDicomFile(fileName) {
+      const dicomService = this.$dicomService;
+      return dicomService.isDicomFile(fileName);
+    },
+
+    /**
+     * 构建图像ID，支持帧图像
+     */
+    buildImageId(node) {
+      if (node.isFrame && node.parentCineImage) {
+        // 帧图像：使用 wadouri:path?frame=N 格式
+        const basePath = node.parentCineImage.fullPath || node.parentCineImage.path;
+        return `wadouri:${basePath}?frame=${node.frameIndex}`;
+      } else {
+        // 普通图像：使用 wadouri:path 格式
+        const imagePath = node.fullPath || node.path;
+        return `wadouri:${imagePath}`;
       }
     },
 
@@ -1225,5 +1758,70 @@ body {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* 播放控制样式 */
+.playback-controls {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+
+  .playback-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: white;
+    font-size: 12px;
+
+    .playback-status {
+      font-weight: 500;
+      color: #409EFF;
+    }
+
+    .playback-speed {
+      color: #ccc;
+    }
+  }
+
+  .playback-buttons {
+    display: flex;
+    gap: 8px;
+
+    .el-button {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      transition: all 0.3s ease;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.4);
+      }
+
+      &.el-button--primary {
+        background: #409EFF;
+        border-color: #409EFF;
+
+        &:hover {
+          background: #66b1ff;
+          border-color: #66b1ff;
+        }
+      }
+    }
+  }
 }
 </style>

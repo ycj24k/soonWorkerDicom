@@ -26,7 +26,13 @@ const state = {
   // 加载文本
   loadingText: '正在加载DICOM文件...',
   // 错误信息
-  error: null
+  error: null,
+  // 是否为动态影像系列
+  isDynamicSeries: false,
+  // 动态影像详细信息
+  cineInfo: null,
+  // 当前动态影像文件路径
+  currentCineImagePath: null
 };
 
 const mutations = {
@@ -40,6 +46,18 @@ const mutations = {
 
   SET_ERROR(state, error) {
     state.error = error;
+  },
+
+  SET_IS_DYNAMIC_SERIES(state, isDynamic) {
+    state.isDynamicSeries = isDynamic;
+  },
+
+  SET_CINE_INFO(state, cineInfo) {
+    state.cineInfo = cineInfo;
+  },
+
+  SET_CURRENT_CINE_IMAGE_PATH(state, path) {
+    state.currentCineImagePath = path;
   },
 
   SET_CURRENT_DIRECTORY(state, directory) {
@@ -88,6 +106,9 @@ const mutations = {
     // state.loading = false;
     // state.loadingText = '正在加载DICOM文件...';
     state.error = null;
+    state.isDynamicSeries = false;
+    state.cineInfo = null;
+    state.currentCineImagePath = null;
   }
 };
 
@@ -96,8 +117,7 @@ const actions = {
    * 加载DICOM目录
    */
   async loadDicomDirectory({ commit }, directory) {
-    commit('SET_LOADING', true);
-    commit('SET_LOADING_TEXT', '正在分析DICOM目录结构...');
+    // 不再自动设置loading状态，由组件控制
     commit('SET_ERROR', null);
     
     try {
@@ -105,20 +125,33 @@ const actions = {
       commit('RESET_STATE');
       commit('SET_CURRENT_DIRECTORY', directory);
 
-      commit('SET_LOADING_TEXT', '正在扫描目录文件...');
       // 获取目录树
       const directoryTree = dicomService.getDirectoryTree(directory);
-      
-      commit('SET_LOADING_TEXT', '正在解析DICOM结构...');
       // 智能分析DICOM结构
       const structureAnalysis = dicomService.analyzeDicomStructure(directoryTree);
       
       if (!structureAnalysis) {
+        console.error('DICOM目录结构分析失败');
         throw new Error('DICOM目录结构分析失败');
       }
       
       if (structureAnalysis.seriesNodes.length === 0 && structureAnalysis.imageNodes.length === 0) {
+        console.error('未找到任何有效的DICOM文件');
         throw new Error('未找到任何有效的DICOM文件');
+      }
+
+      // 检测是否为动态影像
+      const dynamicResult = dicomService.isDynamicImageSeries(structureAnalysis.seriesNodes);
+      
+      if (dynamicResult && dynamicResult.isDynamic) {
+        commit('SET_IS_DYNAMIC_SERIES', true);
+        commit('SET_CINE_INFO', dynamicResult.cineInfo);
+        commit('SET_CURRENT_CINE_IMAGE_PATH', dynamicResult.imagePath);
+        console.log('🎬 Vuex: 动态影像信息已保存');
+      } else {
+        commit('SET_IS_DYNAMIC_SERIES', false);
+        commit('SET_CINE_INFO', null);
+        commit('SET_CURRENT_CINE_IMAGE_PATH', null);
       }
       
       // 如果有图像但没有序列，创建默认序列
@@ -131,22 +164,17 @@ const actions = {
         }];
       }
 
-      commit('SET_LOADING_TEXT', '正在设置系列数据...');
       // 直接使用结构分析结果设置系列数据
       commit('SET_DICOM_SERIES', structureAnalysis.seriesNodes);
       
-      commit('SET_LOADING_TEXT', '正在生成图像缩略图...');
       // 生成缩略图
       const { thumbnails, dicomDict } = await dicomService.generateThumbnailList(structureAnalysis.seriesNodes);
       commit('SET_THUMBNAILS', thumbnails);
       commit('SET_DICOM_DICT', dicomDict);
 
-      commit('SET_LOADING_TEXT', '正在构建目录树...');
       // 构建目录树
       const treeData = await dicomService.buildTree([directoryTree]);
       commit('SET_DIRECTORY_TREE', treeData);
-
-      commit('SET_LOADING_TEXT', '正在完成加载...');
       errorHandler.handleSuccess(`DICOM目录加载完成: ${directory}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载DICOM目录失败';
@@ -161,7 +189,8 @@ const actions = {
    * 加载单个DICOM文件
    */
   async loadDicomFile({ commit }, filePath) {
-    commit('SET_LOADING', true);
+    console.log('📁 Vuex: 开始加载单个DICOM文件:', filePath);
+    // 不再自动设置loading状态，由组件控制
     commit('SET_ERROR', null);
     
     try {
@@ -173,6 +202,9 @@ const actions = {
       const path = require('path');
       const normalizedFilePath = path.normalize(filePath);
       const fileName = path.basename(normalizedFilePath);
+      console.log('📄 Vuex: 文件名:', fileName);
+      console.log('📄 Vuex: 标准化路径:', normalizedFilePath);
+      
       const directoryTree = {
         name: fileName,
         path: normalizedFilePath,
@@ -183,13 +215,30 @@ const actions = {
           children: []
         }]
       };
+      console.log('🌳 Vuex: 创建的单文件树结构:', directoryTree);
 
       // 智能分析DICOM结构
+      console.log('🔍 Vuex: 开始分析单文件DICOM结构...');
       const structureAnalysis = dicomService.analyzeDicomStructure(directoryTree);
       if (!structureAnalysis) {
+        console.error('❌ Vuex: DICOM文件格式无效');
         throw new Error('DICOM文件格式无效');
       }
+      console.log('✅ Vuex: DICOM结构分析成功:', structureAnalysis);
 
+      // 检测是否为动态影像
+      const dynamicResult = dicomService.isDynamicImageSeries(structureAnalysis.seriesNodes);
+      
+      if (dynamicResult && dynamicResult.isDynamic) {
+        commit('SET_IS_DYNAMIC_SERIES', true);
+        commit('SET_CINE_INFO', dynamicResult.cineInfo);
+        commit('SET_CURRENT_CINE_IMAGE_PATH', dynamicResult.imagePath);
+        console.log('🎬 Vuex: 动态影像信息已保存');
+      } else {
+        commit('SET_IS_DYNAMIC_SERIES', false);
+        commit('SET_CINE_INFO', null);
+        commit('SET_CURRENT_CINE_IMAGE_PATH', null);
+      }
 
       // 创建单序列结构
       const singleSeries = {

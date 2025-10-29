@@ -3,6 +3,15 @@
     <div class="playback-content">
       <div class="playback-title">播放控制</div>
       
+      <!-- 播放模式选择 -->
+      <div class="playback-mode" v-if="isDynamicSeries">
+        <label class="option-label">播放模式</label>
+        <el-radio-group v-model="playbackMode">
+          <el-radio label="single">单张播放</el-radio>
+          <el-radio label="frame">帧播放</el-radio>
+        </el-radio-group>
+      </div>
+      
       <div class="playback-options">
         <div class="option-group">
           <label class="option-label">播放速度</label>
@@ -25,7 +34,7 @@
           </el-radio-group>
         </div>
 
-        <div class="option-group">
+        <div class="option-group" v-if="!isDynamicSeries || playbackMode === 'frame'">
           <label class="option-label">播放范围</label>
           <div class="range-inputs">
             <el-input-number
@@ -75,10 +84,15 @@ export default {
     totalFrames: {
       type: Number,
       default: 0
+    },
+    isDynamicSeries: {
+      type: Boolean,
+      default: false
     }
   },
   data() {
     return {
+      playbackMode: 'single', // 播放模式：single=单张播放, frame=帧播放
       playbackSpeed: 10,
       playbackDirection: 'forward',
       startFrame: 0,
@@ -99,6 +113,7 @@ export default {
     },
     startPlayback() {
       const options = {
+        mode: this.playbackMode,
         speed: this.playbackSpeed,
         direction: this.playbackDirection,
         startFrame: this.startFrame,

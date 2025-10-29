@@ -26,10 +26,13 @@
     "productName": "SoonView",
     "appId": "com.cardsoon.SoonView",
     "extraFiles": [
-
       {
         "from": "DICOM",
         "to": "./DICOM"
+      },
+      {
+        "from": "dicom-config.txt",
+        "to": "./dicom-config.txt"
       }
     ],
     "linux": {

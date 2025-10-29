@@ -8,6 +8,7 @@ const path = require('path');
 const { Notification } = require('element-ui');
 const dicomParser = require('dicom-parser');
 import PathUtils from '../utils/PathUtils';
+const { ConfigManager } = require('../utils/ConfigManager');
 
 export class DicomService {
   constructor() {
@@ -149,6 +150,32 @@ export class DicomService {
         return false;
       }
       
+      // 使用配置文件中的扩展名列表
+      const configManager = ConfigManager.getInstance();
+      const dicomExtensions = configManager.getDicomExtensions();
+      const fileExt = path.extname(fileName).toLowerCase();
+      
+      // 检查文件扩展名
+      if (dicomExtensions.includes(fileExt)) {
+        return true;
+      }
+      
+      // 检查文件名模式（无扩展名的DICOM文件）
+      const dicomFileNamePatterns = [
+        /^IMG\d+$/i,                    // IMG001, IMG002
+        /^\d+\.\d+\.\d+.*$/i,          // UID格式: 1.2.840.113619...
+        /^[A-Z0-9]{8,}$/i,             // 8位以上大写字母数字组合
+        /^SER\d+$/i,                   // SER001, SER002
+        /^STD\d+$/i,                   // STD001, STD002
+        /^STUDY\d+$/i                  // STUDY001, STUDY002
+      ];
+      
+      for (const pattern of dicomFileNamePatterns) {
+        if (pattern.test(fileName)) {
+          return true;
+        }
+      }
+      
       const stats = fs.statSync(filePath);
       
       // 检查文件大小是否合理（DICOM文件通常大于1KB）
@@ -194,11 +221,13 @@ export class DicomService {
   }
 
   /**
-   * 获取树的最大深度 - 完全按照dashboard的实现
+   * 获取树的最大深度 - 支持1-6层结构
    */
   getMaxDepth(node) {
     if (!node.children || node.children.length === 0) {
-      return 0; // 叶子节点深度为0，完全按照dashboard
+      // 如果是叶子节点且是文件，返回1（表示单文件结构）
+      // 如果是叶子节点且是目录，返回0（表示空目录）
+      return node.isFile ? 1 : 0;
     }
     return 1 + Math.max(...node.children.map(child => this.getMaxDepth(child)));
   }
@@ -215,6 +244,32 @@ export class DicomService {
     
     if (isMultiPatient) {
       const result = this.analyzeMultiPatientStructure(tree);
+      
+      // 确保多患者结构有有效的系列和图像
+      if (result && result.seriesNodes && result.seriesNodes.length > 0) {
+        return result;
+      } else {
+      }
+    }
+
+    // 检查是否为单文件结构
+    if (maxDepth === 1 && tree.children && tree.children.length === 1 && tree.children[0].isFile) {
+      const singleFile = tree.children[0];
+      
+      // 创建单文件结果
+      const result = {
+        seriesNodes: [{
+          name: singleFile.name,
+          path: path.dirname(singleFile.path),
+          children: [singleFile],
+          isFile: false,
+          imageCount: 1
+        }],
+        imageNodes: [singleFile],
+        structureType: 'single-file',
+        maxDepth: 1,
+        isMultiPatient: false
+      };
       return result;
     }
 
@@ -230,13 +285,14 @@ export class DicomService {
     
     const imageNodes = lastTwoLayers.lastLayer; // 图像节点
 
-    return {
+    const result = {
       seriesNodes,
       imageNodes,
       structureType: 'standard', // 标准DICOM结构
       maxDepth,
       isMultiPatient: false
     };
+    return result;
   }
 
   /**
@@ -247,16 +303,36 @@ export class DicomService {
       return false;
     }
     
+    
     // 检查根目录下的子目录是否包含DICOM文件
     // 如果多个子目录都包含DICOM文件，则是多患者目录
     let patientCount = 0;
+    const patientDirs = [];
+    
     tree.children.forEach(child => {
       if (!child.isFile && this.hasDicomFiles(child)) {
         patientCount++;
+        patientDirs.push(child.name);
       }
     });
     
-    return patientCount > 1;
+    
+    // 如果只有1个患者目录，也检查是否是特殊的单患者结构
+    if (patientCount === 1) {
+      const singlePatient = tree.children.find(child => !child.isFile && this.hasDicomFiles(child));
+      if (singlePatient) {
+        // 检查这个患者目录的深度，如果太深可能是单患者结构
+        const patientDepth = this.getMaxDepth(singlePatient);
+        
+        // 如果深度大于3，可能是复杂的单患者结构，不应该作为多患者处理
+        if (patientDepth > 3) {
+          return false;
+        }
+      }
+    }
+    
+    const isMulti = patientCount > 1;
+    return isMulti;
   }
 
   /**
@@ -376,7 +452,336 @@ export class DicomService {
       return aNum - bNum;
     });
     
-    return result;
+    // 处理每个系列中的动态影像，将其分解为帧
+    const processedResult = result.map(series => this.processCineImagesInSeries(series));
+    
+    return processedResult;
+  }
+
+  /**
+   * 检测单个DICOM文件是否为动态影像（包含多个帧）
+   */
+  isCineImage(dicomFilePath) {
+    try {
+      const dicomInfo = this.parseDicomFile(dicomFilePath);
+      if (!dicomInfo) {
+        return false;
+      }
+
+      // 调试：输出DICOM标签信息
+      const path = require('path');
+      const fileName = path.basename(dicomFilePath);
+      console.log(`🔍 检查动态影像标签: ${fileName}`);
+      
+      // 输出所有相关标签的值
+      const tagsToCheck = [
+        'x00280008', '00280008', // Number of Frames
+        'x00181063', '00181063', // Frame Time
+        'x00181016', '00181016', // Cardiac Number of Images
+        'x00181015', '00181015', // Heart Rate
+        'x00200100', '00200100', // Temporal Position Identifier
+        'x00200105', '00200105', // Temporal Position
+        'x00201020', '00201020', // Number of Temporal Positions
+        'x00280009', '00280009', // Frame Increment Pointer
+        'x00201002', '00201002', // Images in Acquisition
+        'x00540081', '00540081'  // Number of Slices
+      ];
+      
+      const tagValues = {};
+      tagsToCheck.forEach(tag => {
+        const value = this.getTagValue(dicomInfo, tag);
+        if (value) {
+          tagValues[tag] = value;
+        }
+      });
+      
+      if (Object.keys(tagValues).length > 0) {
+        console.log(`📋 ${fileName} 相关标签:`, tagValues);
+      }
+
+      // 直接从原始DICOM数据获取标签值（更可靠）
+      const rawData = dicomInfo.rawData;
+      
+      // 检查关键动态影像标签（多种格式）
+      let numberOfFrames = null;
+      let frameTime = null;
+      let cardiacNumberOfImages = null;
+      let heartRate = null;
+      
+      try {
+        // 尝试多种标签格式
+        numberOfFrames = rawData.string('x00280008') || 
+                        rawData.string('00280008') ||
+                        rawData.uint16('x00280008') ||
+                        rawData.uint16('00280008');
+        
+        frameTime = rawData.string('x00181063') || 
+                   rawData.string('00181063') ||
+                   rawData.floatString('x00181063') ||
+                   rawData.floatString('00181063');
+        
+        cardiacNumberOfImages = rawData.string('x00181016') || 
+                              rawData.string('00181016') ||
+                              rawData.uint16('x00181016') ||
+                              rawData.uint16('00181016');
+        
+        heartRate = rawData.string('x00181015') || 
+                   rawData.string('00181015') ||
+                   rawData.uint16('x00181015') ||
+                   rawData.uint16('00181015');
+      } catch (error) {
+        // 如果直接获取失败，使用getTagValue方法
+        numberOfFrames = this.getTagValue(dicomInfo, 'x00280008') || this.getTagValue(dicomInfo, '00280008');
+        frameTime = this.getTagValue(dicomInfo, 'x00181063') || this.getTagValue(dicomInfo, '00181063');
+        cardiacNumberOfImages = this.getTagValue(dicomInfo, 'x00181016') || this.getTagValue(dicomInfo, '00181016');
+        heartRate = this.getTagValue(dicomInfo, 'x00181015') || this.getTagValue(dicomInfo, '00181015');
+      }
+      
+      // 检查其他可能的动态影像标签
+      const temporalPositionIdentifier = this.getTagValue(dicomInfo, 'x00200100') || this.getTagValue(dicomInfo, '00200100');
+      const temporalPosition = this.getTagValue(dicomInfo, 'x00200105') || this.getTagValue(dicomInfo, '00200105');
+      const numberOfTemporalPositions = this.getTagValue(dicomInfo, 'x00201020') || this.getTagValue(dicomInfo, '00201020');
+      const frameIncrementPointer = this.getTagValue(dicomInfo, 'x00280009') || this.getTagValue(dicomInfo, '00280009');
+      
+      // 检查序列相关标签
+      const imagesInAcquisition = this.getTagValue(dicomInfo, 'x00201002') || this.getTagValue(dicomInfo, '00201002');
+      const numberOfSlices = this.getTagValue(dicomInfo, 'x00540081') || this.getTagValue(dicomInfo, '00540081');
+
+      // 调试：显示获取到的标签值
+      console.log(`🔍 ${fileName} 标签值检测:`, {
+        numberOfFrames,
+        frameTime,
+        cardiacNumberOfImages,
+        heartRate
+      });
+
+      // 如果有帧数信息且大于1，则为动态影像
+      if (numberOfFrames && parseInt(numberOfFrames) > 1) {
+        const result = {
+          isCine: true,
+          frameCount: parseInt(numberOfFrames),
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'multi-frame'
+        };
+        console.log(`✅ ${fileName} 检测为动态影像:`, result);
+        return result;
+      }
+
+      // 检查心脏相关标签
+      if (cardiacNumberOfImages && parseInt(cardiacNumberOfImages) > 1) {
+        return {
+          isCine: true,
+          frameCount: parseInt(cardiacNumberOfImages),
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'cardiac'
+        };
+      }
+
+      // 检查帧时间信息
+      if (frameTime && parseFloat(frameTime) > 0) {
+        return {
+          isCine: true,
+          frameCount: 2, // 默认至少有2帧
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'time-series'
+        };
+      }
+
+      // 检查时间位置信息
+      if (numberOfTemporalPositions && parseInt(numberOfTemporalPositions) > 1) {
+        return {
+          isCine: true,
+          frameCount: parseInt(numberOfTemporalPositions),
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'temporal'
+        };
+      }
+
+      // 检查采集中的图像数量
+      if (imagesInAcquisition && parseInt(imagesInAcquisition) > 1) {
+        return {
+          isCine: true,
+          frameCount: parseInt(imagesInAcquisition),
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'acquisition'
+        };
+      }
+
+      // 检查切片数量
+      if (numberOfSlices && parseInt(numberOfSlices) > 1) {
+        return {
+          isCine: true,
+          frameCount: parseInt(numberOfSlices),
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'multi-slice'
+        };
+      }
+
+      // 检查帧增量指针（表示有多个帧）
+      if (frameIncrementPointer) {
+        return {
+          isCine: true,
+          frameCount: 2, // 默认至少有2帧
+          frameTime: frameTime,
+          heartRate: heartRate,
+          type: 'frame-increment'
+        };
+      }
+
+      console.log(`❌ ${fileName} 不是动态影像`);
+      return { isCine: false };
+
+    } catch (error) {
+      console.error(`检测动态影像失败: ${dicomFilePath}`, error);
+      return { isCine: false };
+    }
+  }
+
+  /**
+   * 获取DICOM标签值
+   */
+  getTagValue(dicomInfo, tag) {
+    if (!dicomInfo || !dicomInfo.elements) {
+      return null;
+    }
+    
+    // 标准化标签格式（去掉x前缀，转大写）
+    const normalizedTag = tag.replace(/^x/, '').toUpperCase();
+    
+    for (const element of dicomInfo.elements) {
+      // 支持多种标签格式匹配
+      if (element.tag === tag || 
+          element.tag === normalizedTag ||
+          element.tag === tag.replace(/^x/, '') ||
+          element.tag === tag.toUpperCase()) {
+        return element.value;
+      }
+    }
+    
+    // 如果没有找到，尝试从原始DICOM数据中直接提取
+    if (dicomInfo.rawData && dicomInfo.rawData.elements) {
+      try {
+        const value = dicomInfo.rawData.string(tag);
+        if (value) return value;
+        
+        // 尝试不带x前缀的格式
+        const tagWithoutX = tag.replace(/^x/, '');
+        const value2 = dicomInfo.rawData.string(tagWithoutX);
+        if (value2) return value2;
+      } catch (error) {
+        // 忽略错误，继续其他方式
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * 检测是否为动态影像系列
+   */
+  isDynamicImageSeries(seriesNodes) {
+    if (!seriesNodes || seriesNodes.length === 0) {
+      return false;
+    }
+
+    // 检查每个系列中的DICOM文件，看是否有真正的动态影像
+    for (const series of seriesNodes) {
+      if (!series.children) continue;
+      
+      // 检查系列中的每个文件
+      for (const imageNode of series.children) {
+        if (imageNode.isFile && this.isDicomFile(imageNode.name)) {
+          const imagePath = imageNode.fullPath || imageNode.path;
+          if (imagePath) {
+            // 检测单个文件是否为动态影像
+            const cineInfo = this.isCineImage(imagePath);
+            if (cineInfo && cineInfo.isCine) {
+              return {
+                isDynamic: true,
+                cineInfo: cineInfo,
+                seriesName: series.name,
+                imagePath: imagePath
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 分解动态影像为单独的帧图像节点
+   * 将多帧DICOM文件分解成多个单帧图像节点
+   */
+  extractFramesFromCineImage(cineImageNode, cineInfo) {
+    if (!cineInfo || !cineInfo.isCine || cineInfo.frameCount <= 1) {
+      return [cineImageNode]; // 不是动态影像，返回原节点
+    }
+
+    const frameNodes = [];
+    const path = require('path');
+    
+    for (let frameIndex = 0; frameIndex < cineInfo.frameCount; frameIndex++) {
+      const frameNode = {
+        name: `${path.basename(cineImageNode.name, path.extname(cineImageNode.name))}_frame_${frameIndex + 1}`,
+        path: cineImageNode.path,
+        fullPath: cineImageNode.fullPath || cineImageNode.path,
+        isFile: true,
+        isFrame: true, // 标记为帧节点
+        parentCineImage: cineImageNode, // 指向原始动态影像
+        frameIndex: frameIndex, // 帧索引
+        frameId: `frame_${frameIndex}`,
+        cineInfo: cineInfo
+      };
+      
+      frameNodes.push(frameNode);
+    }
+    
+    console.log(`🎬 分解动态影像: ${cineImageNode.name} -> ${frameNodes.length} 帧`);
+    return frameNodes;
+  }
+
+  /**
+   * 处理系列中的动态影像，将其分解为帧
+   */
+  processCineImagesInSeries(seriesNode) {
+    if (!seriesNode.children) {
+      return seriesNode;
+    }
+
+    const processedChildren = [];
+    
+    for (const child of seriesNode.children) {
+      if (child.isFile && this.isDicomFile(child.name)) {
+        // 检查是否为动态影像
+        const cineInfo = this.isCineImage(child.fullPath || child.path);
+        if (cineInfo && cineInfo.isCine && cineInfo.frameCount > 1) {
+          // 分解为帧
+          const frameNodes = this.extractFramesFromCineImage(child, cineInfo);
+          processedChildren.push(...frameNodes);
+        } else {
+          // 普通图像，直接添加
+          processedChildren.push(child);
+        }
+      } else {
+        // 非文件节点，直接添加
+        processedChildren.push(child);
+      }
+    }
+    
+    // 更新系列的子节点
+    seriesNode.children = processedChildren;
+    seriesNode.processedForFrames = true; // 标记已处理
+    
+    return seriesNode;
   }
 
   /**
@@ -384,8 +789,22 @@ export class DicomService {
    */
   parseDicomFile(filePath) {
     try {
+      
+      // 检查文件是否存在
+      if (!fs.existsSync(filePath)) {
+        console.error(`文件不存在: ${filePath}`);
+        return null;
+      }
+      
       const fileBuffer = fs.readFileSync(filePath);
+      
+      if (fileBuffer.length === 0) {
+        console.error(`文件为空: ${filePath}`);
+        return null;
+      }
+      
       const dicomData = dicomParser.parseDicom(fileBuffer);
+      
       const elements = [];
       
       // 提取关键DICOM标签 - 使用带x前缀的格式
@@ -398,7 +817,22 @@ export class DicomService {
         'x00100020', // Patient ID
         'x00080020', // Study Date
         'x00080030', // Study Time
-        'x0020000d'  // Study Instance UID
+        'x0020000d', // Study Instance UID
+        // 动态影像相关标签
+        'x00181063', // Frame Time
+        'x00181065', // Frame Time Vector
+        'x00181100', // Reconstruction Diameter
+        'x00181210', // Convolution Kernel
+        'x00280008', // Number of Frames
+        'x00280009', // Frame Increment Pointer
+        'x00181015', // Heart Rate
+        'x00181016', // Cardiac Number of Images
+        'x00181018', // Cardiac Cycle Time
+        'x00082111', // Derivation Description
+        'x00082112', // Source Image Sequence
+        'x00082120', // Stage Name
+        'x00082121', // Stage Description
+        'x00082122'  // Stage Number
       ];
       
       // 也尝试不带x前缀的格式作为备选
@@ -411,7 +845,22 @@ export class DicomService {
         '00100020', // Patient ID
         '00080020', // Study Date
         '00080030', // Study Time
-        '0020000D'  // Study Instance UID
+        '0020000D', // Study Instance UID
+        // 动态影像相关标签
+        '00181063', // Frame Time
+        '00181065', // Frame Time Vector
+        '00181100', // Reconstruction Diameter
+        '00181210', // Convolution Kernel
+        '00280008', // Number of Frames
+        '00280009', // Frame Increment Pointer
+        '00181015', // Heart Rate
+        '00181016', // Cardiac Number of Images
+        '00181018', // Cardiac Cycle Time
+        '00082111', // Derivation Description
+        '00082112', // Source Image Sequence
+        '00082120', // Stage Name
+        '00082121', // Stage Description
+        '00082122'  // Stage Number
       ];
       
       // 移除详细调试日志以提升性能
@@ -424,26 +873,35 @@ export class DicomService {
         const normalizedTag = tag.replace(/^x/, '').toUpperCase(); // 标准化标签格式（去掉x前缀，转大写）
         if (extractedTags.has(normalizedTag)) return; // 避免重复
         
-        const element = dicomData.elements[tag];
-        if (element) {
-          const value = dicomData.string(tag);
-          elements.push({
-            tag: normalizedTag,
-            value: value,
-            vr: element.vr
-          });
-          extractedTags.add(normalizedTag);
+        try {
+          const element = dicomData.elements[tag];
+          if (element) {
+            const value = dicomData.string(tag);
+            elements.push({
+              tag: normalizedTag,
+              value: value,
+              vr: element.vr
+            });
+            extractedTags.add(normalizedTag);
+          }
+        } catch (error) {
+          console.warn(`标签 ${tag} 提取失败:`, error.message);
         }
       });
       
-      return elements;
+      
+      return {
+        elements: elements,
+        rawData: dicomData
+      };
     } catch (error) {
+      console.error(`解析DICOM文件失败: ${filePath}`, error);
       return null;
     }
   }
 
   /**
-   * 获取树结构的最后两层数据 - 完全按照dashboard的实现
+   * 获取树结构的最后两层数据 - 智能兼容多种结构
    */
   getLastTwoLayersStandard(tree) {
     const result = { secondLastLayer: [], lastLayer: [] };
@@ -451,38 +909,27 @@ export class DicomService {
     const maxDepth = this.getMaxDepth(tree);
     
     
-    if (maxDepth < 2 || maxDepth > 4) {
-      console.warn(`DICOM数据格式错误，深度为${maxDepth}，期望2-4层！`);
+    if (maxDepth < 1 || maxDepth > 6) {
+      console.warn(`DICOM数据格式错误，深度为${maxDepth}，期望1-6层！`);
       return false;
     }
     
-    // 递归函数 - 完全按照dashboard的逻辑
+    // 智能递归函数 - 自适应多种结构
     function traverse(node, depth) {
       
-      // 根据最大深度和当前深度判断节点类型
-      if (maxDepth === 2) {
-        // 2层结构：PAT-IMG（单文件系列）
-        if (depth === 0 && node.isFile) {
-          // 最底层：图像文件，同时也是系列
-          result.lastLayer.push(node);
+      // 智能识别节点类型，不依赖固定深度映射
+      if (node.isFile) {
+        // 这是图像文件，添加到图像层
+        result.lastLayer.push(node);
+        
+        // 如果是单文件结构，也添加到系列层
+        if (maxDepth === 1) {
           result.secondLastLayer.push(node);
         }
-      } else if (maxDepth === 3) {
-        // 3层结构：PAT-STUDY-IMG (单系列)
-        if (depth === 0 && node.isFile) {
-          // 最底层：图像文件
-          result.lastLayer.push(node);
-        } else if (depth === 2) {
-          // 研究层：直接包含图像，也是系列层
-          result.secondLastLayer.push(node);
-        }
-      } else if (maxDepth === 4) {
-        // 4层结构：PAT-STD-SER-IMG
-        if (depth === 0 && node.isFile) {
-          // 最底层：图像文件
-          result.lastLayer.push(node);
-        } else if (depth === 2) {
-          // 系列层：包含图像的目录
+      } else {
+        // 这是目录，检查是否应该作为系列
+        const shouldBeSeries = checkIfShouldBeSeries(node, depth, maxDepth);
+        if (shouldBeSeries) {
           result.secondLastLayer.push(node);
         }
       }
@@ -494,10 +941,42 @@ export class DicomService {
       } else {
       }
     }
+
+    // 智能判断目录是否应该作为系列
+    function checkIfShouldBeSeries(node, depth, maxDepth) {
+      // 检查目录名是否像系列名
+      const isSeriesName = /^(SER|STD|STUDY|SERIES|SEQ)\d*$/i.test(node.name);
+      
+      // 检查目录是否包含图像文件
+      const hasImageFiles = node.children && node.children.some(child => 
+        child.isFile && isDicomFileName(child.name)
+      );
+      
+      // 检查深度是否合理（系列通常在倒数第二层）
+      const isReasonableDepth = depth >= maxDepth - 2 && depth <= maxDepth - 1;
+      
+      
+      return (isSeriesName || hasImageFiles) && isReasonableDepth;
+    }
+
+    // 判断文件名是否像DICOM图像文件
+    function isDicomFileName(fileName) {
+      const dicomPatterns = [
+        /^IMG\d+$/i,                    // IMG001, IMG002
+        /^\d+\.\d+\.\d+.*$/i,          // UID格式
+        /\.dcm$/i,                      // .dcm扩展名
+        /\.dicom$/i,                    // .dicom扩展名
+        /\.dic$/i,                      // .dic扩展名
+        /\.ima$/i                       // .ima扩展名
+      ];
+      
+      return dicomPatterns.some(pattern => pattern.test(fileName));
+    }
     
     // 从根节点开始遍历，初始深度为最大深度
     traverse(tree, maxDepth);
-
+    
+    
     return result;
   }
 

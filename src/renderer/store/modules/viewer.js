@@ -37,6 +37,7 @@ const state = {
   // 播放控制
   playbackControl: {
     isPlaying: false,
+    isPaused: false,
     speed: 10, // 默认10帧/秒
     currentFrame: 0,
     totalFrames: 0,
@@ -87,10 +88,17 @@ const mutations = {
 
   START_PLAYBACK(state) {
     state.playbackControl.isPlaying = true;
+    state.playbackControl.isPaused = false;
   },
 
   STOP_PLAYBACK(state) {
     state.playbackControl.isPlaying = false;
+    state.playbackControl.isPaused = false;
+  },
+
+  PAUSE_PLAYBACK(state) {
+    state.playbackControl.isPlaying = false;
+    state.playbackControl.isPaused = true;
   },
 
   SET_PLAYBACK_SPEED(state, speed) {
@@ -145,7 +153,7 @@ const actions = {
   },
 
   pausePlayback({ commit }) {
-    commit('STOP_PLAYBACK');
+    commit('PAUSE_PLAYBACK');
   },
 
   setPlaybackSpeed({ commit }, speed) {
@@ -192,6 +200,7 @@ const getters = {
   currentGridLayout: (state) => state.gridViewState.layout,
   selectedGridViewport: (state) => state.gridViewState.viewports[state.gridViewState.selectedViewportIndex] || null,
   isPlaying: (state) => state.playbackControl.isPlaying,
+  isPaused: (state) => state.playbackControl.isPaused,
   playbackSpeed: (state) => state.playbackControl.speed
 };
 

@@ -11,6 +11,7 @@ export class PlaybackService {
     this.playbackTimer = null;
     this.playbackControl = {
       isPlaying: false,
+      isPaused: false,
       speed: 10,
       currentFrame: 0,
       totalFrames: 0,
@@ -36,6 +37,7 @@ export class PlaybackService {
     // 设置播放参数
     this.playbackControl = {
       isPlaying: true,
+      isPaused: false,
       speed: options.speed || 10,
       currentFrame: options.startFrame || 0,
       totalFrames: imageIds.length,
@@ -46,14 +48,14 @@ export class PlaybackService {
     const endFrame = options.endFrame || imageIds.length - 1;
     const loop = options.loop !== false; // 默认循环
 
-    // console.log('开始播放:', {
-    //   totalFrames: imageIds.length,
-    //   speed: this.playbackControl.speed,
-    //   direction: this.playbackControl.direction,
-    //   startFrame,
-    //   endFrame,
-    //   loop
-    // });
+    console.log('🎬 开始播放:', {
+      totalFrames: imageIds.length,
+      speed: this.playbackControl.speed,
+      direction: this.playbackControl.direction,
+      startFrame,
+      endFrame,
+      loop
+    });
 
     // 开始播放循环
     this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
@@ -63,7 +65,16 @@ export class PlaybackService {
    * 播放循环
    */
   playbackLoop(element, imageIds, startFrame, endFrame, loop) {
+    console.log('🎬 playbackLoop 调用:', {
+      isPlaying: this.playbackControl.isPlaying,
+      currentFrame: this.playbackControl.currentFrame,
+      totalFrames: imageIds.length,
+      startFrame,
+      endFrame
+    });
+    
     if (!this.playbackControl.isPlaying) {
+      console.log('🎬 播放已停止，退出循环');
       return;
     }
 
@@ -109,8 +120,13 @@ export class PlaybackService {
    */
   async loadFrame(element, imageId) {
     try {
-      await cornerstone.loadImage(imageId);
-      cornerstone.displayImage(element, await cornerstone.loadImage(imageId));
+      if (!element) {
+        console.error('元素为空');
+        return;
+      }
+      
+      const image = await cornerstone.loadImage(imageId);
+      cornerstone.displayImage(element, image);
     } catch (error) {
       console.error('加载帧失败:', error);
     }
@@ -126,7 +142,7 @@ export class PlaybackService {
     }
 
     this.playbackControl.isPlaying = false;
-    // console.log('播放已停止');
+    this.playbackControl.isPaused = false;
   }
 
   /**
@@ -139,20 +155,26 @@ export class PlaybackService {
     }
 
     this.playbackControl.isPlaying = false;
-    // console.log('播放已暂停');
+    this.playbackControl.isPaused = true;
   }
 
   /**
    * 恢复播放
    */
-  resumePlayback(element, imageIds) {
+  resumePlayback(element, imageIds, options = {}) {
     if (this.playbackControl.isPlaying) {
       return;
     }
 
     this.playbackControl.isPlaying = true;
-    this.playbackLoop(element, imageIds, 0, imageIds.length - 1, true);
-    // console.log('播放已恢复');
+    this.playbackControl.isPaused = false;
+    
+    // 使用保存的播放参数或默认参数
+    const startFrame = options.startFrame || this.playbackControl.currentFrame || 0;
+    const endFrame = options.endFrame || (imageIds.length - 1);
+    const loop = options.loop !== undefined ? options.loop : true;
+    
+    this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
   }
 
   /**
@@ -212,6 +234,13 @@ export class PlaybackService {
   }
 
   /**
+   * 检查是否已暂停
+   */
+  isPaused() {
+    return this.playbackControl.isPaused;
+  }
+
+  /**
    * 获取播放控制状态
    */
   getPlaybackControl() {
@@ -260,11 +289,12 @@ export class PlaybackService {
     this.stopPlayback();
     this.playbackControl = {
       isPlaying: false,
+      isPaused: false,
       speed: 10,
       currentFrame: 0,
       totalFrames: 0,
       direction: 'forward'
     };
-    // console.log('播放服务已清理');
+    console.log('播放服务已清理');
   }
 }

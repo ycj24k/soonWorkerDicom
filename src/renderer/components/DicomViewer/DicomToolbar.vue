@@ -46,10 +46,10 @@
           </div>
           <div 
             class="action_btn" 
-            :class="{ 'action_btn1': actionClick === 2 || isPlaying }" 
+            :class="{ 'action_btn1': actionClick === 2 }" 
             @mousedown="actionClick = 2" 
             @mouseup="actionClick = 0"
-            @click="$emit('toggle-playback')"
+            @click="() => {}"
           >
             <img class="action_img action_img1" src="@/assets/images/action2.png" />
           </div>
