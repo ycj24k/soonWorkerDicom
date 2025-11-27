@@ -17,6 +17,8 @@ export class PlaybackService {
       totalFrames: 0,
       direction: 'forward'
     };
+    this.onCompleteCallback = null;
+    this.onFrameChangeCallback = null; // 帧变化回调
   }
 
   static getInstance() {
@@ -34,30 +36,71 @@ export class PlaybackService {
       this.stopPlayback();
     }
 
+    // 验证 imageIds
+    if (!imageIds || imageIds.length === 0) {
+      return;
+    }
+
+    const totalFrames = imageIds.length;
+    
+    // 验证并修正起始帧和结束帧
+    let startFrame = options.startFrame !== undefined ? options.startFrame : 0;
+    let endFrame = options.endFrame !== undefined ? options.endFrame : totalFrames - 1;
+    
+    // 确保在有效范围内
+    startFrame = Math.max(0, Math.min(startFrame, totalFrames - 1));
+    endFrame = Math.max(0, Math.min(endFrame, totalFrames - 1));
+    
+    // 确保 startFrame <= endFrame
+    if (startFrame > endFrame) {
+      const temp = startFrame;
+      startFrame = endFrame;
+      endFrame = temp;
+    }
+
     // 设置播放参数
     this.playbackControl = {
       isPlaying: true,
       isPaused: false,
       speed: options.speed || 10,
-      currentFrame: options.startFrame || 0,
-      totalFrames: imageIds.length,
+      currentFrame: startFrame,
+      totalFrames: totalFrames,
       direction: options.direction || 'forward'
     };
 
-    const startFrame = options.startFrame || 0;
-    const endFrame = options.endFrame || imageIds.length - 1;
+    // 保存播放结束回调
+    this.onCompleteCallback = options.onComplete || null;
+    // 保存帧变化回调
+    this.onFrameChangeCallback = options.onFrameChange || null;
+
     const loop = options.loop !== false; // 默认循环
 
-    console.log('🎬 开始播放:', {
-      totalFrames: imageIds.length,
-      speed: this.playbackControl.speed,
-      direction: this.playbackControl.direction,
-      startFrame,
-      endFrame,
-      loop
-    });
 
     // 开始播放循环
+    // 先加载第一帧并触发回调
+    if (startFrame >= 0 && startFrame < imageIds.length) {
+      const firstImageId = imageIds[startFrame];
+      if (firstImageId) {
+        this.loadFrame(element, firstImageId);
+        if (this.onFrameChangeCallback && typeof this.onFrameChangeCallback === 'function') {
+          try {
+            this.onFrameChangeCallback(startFrame, firstImageId);
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error('第一帧变化回调执行失败:', error);
+            }
+          }
+        }
+      }
+    }
+    
+    // 开始播放循环（从下一帧开始，因为第一帧已经加载）
+    // 注意：playbackLoop 会从 currentFrame 开始，而 currentFrame 已经设置为 startFrame
+    // 所以需要先递增一次，或者修改逻辑让第一帧不重复加载
+    // 为了不重复加载，我们让播放循环从 startFrame + 1 开始（如果是向前播放）
+    if (this.playbackControl.direction === 'forward' && startFrame < endFrame) {
+      this.playbackControl.currentFrame = startFrame + 1;
+    }
     this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
   }
 
@@ -65,53 +108,185 @@ export class PlaybackService {
    * 播放循环
    */
   playbackLoop(element, imageIds, startFrame, endFrame, loop) {
-    console.log('🎬 playbackLoop 调用:', {
-      isPlaying: this.playbackControl.isPlaying,
-      currentFrame: this.playbackControl.currentFrame,
-      totalFrames: imageIds.length,
-      startFrame,
-      endFrame
-    });
-    
+    // 首先检查播放状态
     if (!this.playbackControl.isPlaying) {
-      console.log('🎬 播放已停止，退出循环');
       return;
     }
 
-    const currentFrame = this.playbackControl.currentFrame;
+    // 验证参数有效性
+    if (!imageIds || imageIds.length === 0) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('🎬 图像ID列表为空，停止播放');
+      }
+      this.stopPlayback();
+      return;
+    }
+
+    const totalFrames = imageIds.length;
+    let currentFrame = this.playbackControl.currentFrame;
     const direction = this.playbackControl.direction;
 
-    // 检查是否到达边界
-    if (direction === 'forward' && currentFrame >= endFrame) {
-      if (loop) {
-        this.playbackControl.currentFrame = startFrame;
+    // 验证并修正边界值，确保在有效范围内
+    const validStartFrame = Math.max(0, Math.min(startFrame, totalFrames - 1));
+    const validEndFrame = Math.max(0, Math.min(endFrame, totalFrames - 1));
+    
+    // 确保 startFrame <= endFrame
+    if (validStartFrame > validEndFrame) {
+      this.stopPlayback();
+      return;
+    }
+
+    // 验证当前帧索引是否在有效范围内
+    if (currentFrame < 0 || currentFrame >= totalFrames) {
+      // 重置到有效范围内的最后一帧（如果超出），或起始帧（如果小于）
+      if (currentFrame >= totalFrames) {
+        currentFrame = validEndFrame;
       } else {
+        currentFrame = validStartFrame;
+      }
+      this.playbackControl.currentFrame = currentFrame;
+    } else if (currentFrame < validStartFrame) {
+      // 如果当前帧小于起始帧，重置到起始帧
+      currentFrame = validStartFrame;
+      this.playbackControl.currentFrame = currentFrame;
+    } else if (currentFrame > validEndFrame) {
+      // 如果当前帧大于结束帧，重置到结束帧
+      currentFrame = validEndFrame;
+      this.playbackControl.currentFrame = currentFrame;
+    }
+
+    // 检查是否到达边界（在加载帧之前检查）
+    if (direction === 'forward' && currentFrame > validEndFrame) {
+      if (loop) {
+        currentFrame = validStartFrame;
+        this.playbackControl.currentFrame = currentFrame;
+      } else {
+        // 播放结束，先保存回调，再停止播放，然后调用回调
+        const callback = this.onCompleteCallback;
         this.stopPlayback();
+        if (callback && typeof callback === 'function') {
+          try {
+            callback();
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error('播放结束回调执行失败:', error);
+            }
+          }
+        }
         return;
       }
-    } else if (direction === 'backward' && currentFrame <= startFrame) {
+    } else if (direction === 'backward' && currentFrame < validStartFrame) {
       if (loop) {
-        this.playbackControl.currentFrame = endFrame;
+        currentFrame = validEndFrame;
+        this.playbackControl.currentFrame = currentFrame;
       } else {
+        // 播放结束，先保存回调，再停止播放，然后调用回调
+        const callback = this.onCompleteCallback;
         this.stopPlayback();
+        if (callback && typeof callback === 'function') {
+          try {
+            callback();
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error('播放结束回调执行失败:', error);
+            }
+          }
+        }
         return;
       }
     }
 
-    // 加载当前帧
-    this.loadFrame(element, imageIds[currentFrame]);
+    // 再次验证当前帧在有效范围内（双重检查）
+    if (currentFrame < 0 || currentFrame >= totalFrames) {
+      this.stopPlayback();
+      return;
+    }
+
+    // 获取当前帧的 imageId
+    const imageId = imageIds[currentFrame];
+    if (!imageId) {
+      // 如果 imageId 不存在，尝试跳过这一帧
+      if (direction === 'forward') {
+        currentFrame++;
+      } else {
+        currentFrame--;
+      }
+      this.playbackControl.currentFrame = currentFrame;
+      // 继续下一帧，但要确保不超出范围
+      const interval = 1000 / this.playbackControl.speed;
+      this.playbackTimer = setTimeout(() => {
+        this.playbackLoop(element, imageIds, validStartFrame, validEndFrame, loop);
+      }, interval);
+      return;
+    }
+
+    // 加载当前帧（只有在所有验证通过后）
+    this.loadFrame(element, imageId);
+    
+    // 通知帧变化（在加载帧之后，更新索引之前）
+    if (this.onFrameChangeCallback && typeof this.onFrameChangeCallback === 'function') {
+      try {
+        this.onFrameChangeCallback(currentFrame, imageId);
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('帧变化回调执行失败:', error);
+        }
+      }
+    }
 
     // 更新帧索引
     if (direction === 'forward') {
-      this.playbackControl.currentFrame++;
+      currentFrame++;
     } else {
-      this.playbackControl.currentFrame--;
+      currentFrame--;
+    }
+    this.playbackControl.currentFrame = currentFrame;
+
+    // 检查是否到达边界（在设置下一帧定时器之前检查）
+    if (direction === 'forward' && currentFrame > validEndFrame) {
+      if (loop) {
+        currentFrame = validStartFrame;
+        this.playbackControl.currentFrame = currentFrame;
+      } else {
+        // 播放结束，先保存回调，再停止播放，然后调用回调
+        const callback = this.onCompleteCallback;
+        this.stopPlayback();
+        if (callback && typeof callback === 'function') {
+          try {
+            callback();
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error('播放结束回调执行失败:', error);
+            }
+          }
+        }
+        return; // 不再设置定时器
+      }
+    } else if (direction === 'backward' && currentFrame < validStartFrame) {
+      if (loop) {
+        currentFrame = validEndFrame;
+        this.playbackControl.currentFrame = currentFrame;
+      } else {
+        // 播放结束，先保存回调，再停止播放，然后调用回调
+        const callback = this.onCompleteCallback;
+        this.stopPlayback();
+        if (callback && typeof callback === 'function') {
+          try {
+            callback();
+          } catch (error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.error('播放结束回调执行失败:', error);
+            }
+          }
+        }
+        return; // 不再设置定时器
+      }
     }
 
-    // 设置下一帧的定时器
+    // 设置下一帧的定时器（只有在未到达边界或循环模式下）
     const interval = 1000 / this.playbackControl.speed;
     this.playbackTimer = setTimeout(() => {
-      this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
+      this.playbackLoop(element, imageIds, validStartFrame, validEndFrame, loop);
     }, interval);
   }
 
@@ -121,14 +296,26 @@ export class PlaybackService {
   async loadFrame(element, imageId) {
     try {
       if (!element) {
-        console.error('元素为空');
+        if (process.env.NODE_ENV === 'development') {
+          console.error('加载帧失败: 元素为空');
+        }
+        return;
+      }
+
+      if (!imageId) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('加载帧失败: imageId 为空');
+        }
         return;
       }
       
       const image = await cornerstone.loadImage(imageId);
       cornerstone.displayImage(element, image);
     } catch (error) {
-      console.error('加载帧失败:', error);
+      if (process.env.NODE_ENV === 'development') {
+        console.error('加载帧失败:', error.message || error);
+      }
+      // 加载失败时不停止播放，让播放循环继续处理
     }
   }
 
@@ -143,6 +330,9 @@ export class PlaybackService {
 
     this.playbackControl.isPlaying = false;
     this.playbackControl.isPaused = false;
+    // 清除回调
+    this.onCompleteCallback = null;
+    this.onFrameChangeCallback = null;
   }
 
   /**
@@ -162,16 +352,56 @@ export class PlaybackService {
    * 恢复播放
    */
   resumePlayback(element, imageIds, options = {}) {
+    // 保存播放结束回调
+    if (options.onComplete) {
+      this.onCompleteCallback = options.onComplete;
+    }
     if (this.playbackControl.isPlaying) {
       return;
     }
 
+    // 验证 imageIds
+    if (!imageIds || imageIds.length === 0) {
+      return;
+    }
+
+    const totalFrames = imageIds.length;
+
+    // 获取当前帧索引，确保在有效范围内
+    let currentFrame = this.playbackControl.currentFrame || 0;
+    // 如果当前帧超出范围，重置到有效范围内
+    if (currentFrame < 0 || currentFrame >= totalFrames) {
+      currentFrame = Math.max(0, Math.min(currentFrame, totalFrames - 1));
+      this.playbackControl.currentFrame = currentFrame;
+    }
+
+    // 使用保存的播放参数或默认参数，并验证范围
+    let startFrame = options.startFrame !== undefined ? options.startFrame : currentFrame;
+    let endFrame = options.endFrame !== undefined ? options.endFrame : (totalFrames - 1);
+    
+    // 确保在有效范围内
+    startFrame = Math.max(0, Math.min(startFrame, totalFrames - 1));
+    endFrame = Math.max(0, Math.min(endFrame, totalFrames - 1));
+    
+    // 确保 startFrame <= endFrame
+    if (startFrame > endFrame) {
+      const temp = startFrame;
+      startFrame = endFrame;
+      endFrame = temp;
+    }
+    
+    // 确保当前帧在有效范围内
+    if (currentFrame < startFrame) {
+      currentFrame = startFrame;
+    } else if (currentFrame > endFrame) {
+      currentFrame = endFrame;
+    }
+    this.playbackControl.currentFrame = currentFrame;
+
     this.playbackControl.isPlaying = true;
     this.playbackControl.isPaused = false;
+    this.playbackControl.totalFrames = totalFrames;
     
-    // 使用保存的播放参数或默认参数
-    const startFrame = options.startFrame || this.playbackControl.currentFrame || 0;
-    const endFrame = options.endFrame || (imageIds.length - 1);
     const loop = options.loop !== undefined ? options.loop : true;
     
     this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
@@ -295,6 +525,6 @@ export class PlaybackService {
       totalFrames: 0,
       direction: 'forward'
     };
-    console.log('播放服务已清理');
+    this.onCompleteCallback = null;
   }
 }

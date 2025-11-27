@@ -10,6 +10,13 @@
 
     <!-- 工具栏 -->
     <DicomToolbar 
+      :active-action="activeAction"
+      :active2="active2"
+      :show-playback-console="showPlaybackConsole"
+      :is-playback-playing="isPlaybackPlaying"
+      :playback-speed="playbackSpeed"
+      :is-playback-first="isPlaybackFirst"
+      :is-playback-last="isPlaybackLast"
       @open-directory="selectPath"
       @open-file="selectFile"
       @reset-viewport="resetViewport"
@@ -22,6 +29,12 @@
       @clear-measurements="clearMeasurements"
       @show-image-info="showImageInfo"
       @toggle-grid-layout="toggleGridLayout"
+      @update:active2="active2 = $event"
+      @close-playback-console="handleClosePlaybackConsole"
+      @playback-previous="handlePlaybackPrevious"
+      @playback-next="handlePlaybackNext"
+      @playback-play-pause="handlePlaybackPlayPause"
+      @playback-speed-change="handlePlaybackSpeedChange"
     />
 
     <!-- 主内容区 -->
@@ -35,69 +48,8 @@
         id="dicomViewer" 
         :style="{ cursor: currentCursor }"
         class="dicom-viewer"
-        :class="{ 'grid-view': isGridViewActive }"
+        :class="{ 'grid-view': isGridViewActive, 'grid-active': isGridViewActive }"
       >
-        <!-- 图像信息覆盖层 -->
-        <DicomImageInfo />
-        
-        <!-- 动态影像播放控制 -->
-        <div v-if="isDynamicSeries && cineInfo && currentPlayingState" class="playback-controls">
-          <div class="playback-info">
-            <span class="playback-status">动态影像帧播放中 ({{ cineInfo.type }})</span>
-            <span class="playback-speed">{{ cineInfo.frameCount }} 帧</span>
-          </div>
-          <div class="playback-buttons">
-            <el-button 
-              size="mini" 
-              icon="el-icon-video-pause" 
-              @click="pauseCinePlayback"
-              v-if="!isPausedState"
-            >暂停</el-button>
-            <el-button 
-              size="mini" 
-              icon="el-icon-video-play" 
-              @click="resumeCinePlayback"
-              v-if="isPausedState"
-            >继续</el-button>
-            <el-button 
-              size="mini" 
-              icon="el-icon-video-close" 
-              @click="stopCinePlayback"
-            >停止</el-button>
-            <el-button 
-              size="mini" 
-              icon="el-icon-setting" 
-              @click="showCineSettings"
-            >设置</el-button>
-      </div>
-    </div>
-        
-        <!-- 普通影像播放控制 -->
-        <div v-if="!isDynamicSeries && currentPlayingState" class="playback-controls">
-          <div class="playback-info">
-            <span class="playback-status">单张影像播放中</span>
-            <span class="playback-speed">{{ currentImageIds ? currentImageIds.length : 0 }} 张</span>
-          </div>
-          <div class="playback-buttons">
-            <el-button 
-              size="mini" 
-              icon="el-icon-video-pause" 
-              @click="pausePlayback"
-              v-if="!isPausedState"
-            >暂停</el-button>
-            <el-button 
-              size="mini" 
-              icon="el-icon-video-play" 
-              @click="resumePlayback"
-              v-if="isPausedState"
-            >继续</el-button>
-            <el-button 
-              size="mini" 
-              icon="el-icon-video-close" 
-              @click="stopPlayback"
-            >停止</el-button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -109,15 +61,6 @@
       @close="closeGridLayoutSelector"
     />
 
-    <!-- 播放控制对话框 -->
-    <PlaybackControlDialog
-      ref="playbackControlDialog"
-      :show="showPlaybackDialog"
-      :total-frames="currentImageIds.length"
-      :is-dynamic-series="isDynamicSeries"
-      @start-playback="startPlayback"
-      @close="closePlaybackDialog"
-    />
 
     <!-- 图像详细信息对话框 -->
     <ImageInfo ref="imageInfo" />
@@ -129,7 +72,24 @@
         <div class="loading-text">{{ loadingText }}</div>
       </div>
     </div>
-    
+
+    <!-- 底部系列后台加载进度条 -->
+    <div
+      v-if="seriesProgress && seriesProgress.isActive"
+      class="series-progress-bar"
+    >
+      <div class="series-progress-text">
+        正在加载系列 {{ seriesProgress.currentSeriesIndex + 1 }}/{{ totalSeriesCount }} ，
+        图像 {{ seriesProgress.currentLoaded }}/{{ seriesProgress.currentTotal }}
+      </div>
+      <el-progress
+        :percentage="seriesProgressPercentage"
+        :stroke-width="6"
+        status="success"
+        :show-text="false"
+      />
+    </div>
+
   </div>
 </template>
 
@@ -137,33 +97,37 @@
 import { mapState, mapGetters, mapActions } from 'vuex';
 import DicomToolbar from './DicomToolbar.vue';
 import DicomSidebar from './DicomSidebar.vue';
-import DicomImageInfo from './DicomImageInfo.vue';
 import GridLayoutSelector from './GridLayoutSelector.vue';
-import PlaybackControlDialog from './PlaybackControlDialog.vue';
-import ImageInfo from '../../views/dashboard/components/image-info.vue';
-import { cornerstoneService, gridViewService, playbackService, errorHandler } from '../../services';
-import PathUtils from '../../utils/PathUtils';
-const { ConfigManager } = require('../../utils/ConfigManager');
-const cinePlaybackService = require('../../services/CinePlaybackService');
-// 移除已删除的工具类引用
+import ImageInfo from './ImageInfo.vue';
+import { cornerstoneService, gridViewService } from '../../services';
+import playbackMixin from './mixins/playbackMixin';
+import imageLoaderMixin from './mixins/imageLoaderMixin';
+import toolMixin from './mixins/toolMixin';
+import gridLayoutMixin from './mixins/gridLayoutMixin';
+import keyboardMixin from './mixins/keyboardMixin';
 
 const { ipcRenderer } = require('electron');
-const { dialog } = require('@electron/remote');
+const cinePlaybackService = require('../../services/CinePlaybackService');
 
 export default {
   name: 'DicomViewer',
   components: {
     DicomToolbar,
     DicomSidebar,
-    DicomImageInfo,
     GridLayoutSelector,
-    PlaybackControlDialog,
     ImageInfo
   },
+  mixins: [
+    playbackMixin,
+    imageLoaderMixin,
+    toolMixin,
+    gridLayoutMixin,
+    keyboardMixin
+  ],
   data() {
     return {
       showGridLayoutSelector: false,
-      showPlaybackDialog: false,
+      showPlaybackConsole: false,
       // 本地loading状态
       localLoading: false,
       // 鼠标样式控制
@@ -181,9 +145,9 @@ export default {
     };
   },
   computed: {
-    ...mapState('dicom', ['loading', 'loadingText', 'error', 'isDynamicSeries', 'cineInfo', 'currentCineImagePath']),
+    ...mapState('dicom', ['loading', 'loadingText', 'error', 'isDynamicSeries', 'cineInfo', 'currentCineImagePath', 'activeImageIndex', 'dicomSeries', 'seriesProgress']),
     ...mapState('viewer', ['toolState']),
-    ...mapGetters('dicom', ['currentImage', 'currentImageIds']),
+    ...mapGetters('dicom', ['currentImage', 'currentImageIds', 'currentSeries']),
     ...mapGetters('viewer', ['isGridViewActive', 'currentGridLayout', 'selectedGridViewport', 'isPlaying', 'isPaused', 'playbackSpeed']),
     
     // 播放状态计算
@@ -215,6 +179,111 @@ export default {
     // 网格状态
     gridState() {
       return gridViewService.getGridState();
+    },
+    
+    // 播放控制台相关计算属性
+    isPlaybackPlaying() {
+      // 使用 Vuex 状态，播放服务状态会在播放时同步更新
+      return this.isPlaying;
+    },
+    
+    isPlaybackFirst() {
+      // 使用 mixin 中的方法，确保逻辑一致
+      if (!this.getCurrentImageFileIndex) {
+        return true;
+      }
+      
+      // 确保计算属性能响应 activeImageIndex 的变化
+      const _ = this.activeImageIndex; // 建立响应式依赖
+      const currentSeries = this.$store.getters['dicom/currentSeries']; // 建立响应式依赖
+      
+      if (!currentSeries) {
+        return true;
+      }
+      
+      const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
+      
+      // 如果找不到当前图像索引，或者索引无效，或者已经是第一张，则禁用上一张按钮
+      if (imageFiles.length === 0) {
+        return true;
+      }
+      if (currentImageFileIndex < 0) {
+        return true;
+      }
+      // 只有当 currentImageFileIndex > 0 时才启用上一张按钮
+      return currentImageFileIndex === 0;
+    },
+    
+    isPlaybackLast() {
+      // 使用 mixin 中的方法，确保逻辑一致
+      if (!this.getCurrentImageFileIndex) {
+        return true;
+      }
+      
+      // 确保计算属性能响应 activeImageIndex 的变化
+      const _ = this.activeImageIndex; // 建立响应式依赖
+      const currentSeries = this.$store.getters['dicom/currentSeries']; // 建立响应式依赖
+      
+      if (!currentSeries) {
+        return true;
+      }
+      
+      const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
+      
+      if (imageFiles.length === 0) {
+        return true;
+      }
+      if (currentImageFileIndex < 0) {
+        return true;
+      }
+      // 只有当 currentImageFileIndex >= imageFiles.length - 1 时才禁用下一张按钮
+      return currentImageFileIndex >= imageFiles.length - 1;
+    },
+
+    // 系列后台加载进度百分比
+    seriesProgressPercentage() {
+      if (!this.seriesProgress || !this.seriesProgress.isActive || !this.seriesProgress.currentTotal) {
+        return 0;
+      }
+      const loaded = this.seriesProgress.currentLoaded || 0;
+      const total = this.seriesProgress.currentTotal || 0;
+      if (total === 0) return 0;
+      const percent = Math.round((loaded * 100) / total);
+      return percent > 100 ? 100 : percent;
+    },
+
+    totalSeriesCount() {
+      return Array.isArray(this.dicomSeries) ? this.dicomSeries.length : 0;
+    }
+  },
+  watch: {
+    // 监听活动图像索引变化，自动更新视口信息
+    '$store.state.dicom.activeImageIndex': {
+      handler() {
+        this.$nextTick(() => {
+          if (typeof this.getGridViewportElements === 'function') {
+            const viewports = this.getGridViewportElements();
+            viewports.forEach(viewport => {
+              const overlay = viewport.querySelector('.viewport-info-overlay');
+              if (overlay && typeof this.updateViewportInfo === 'function') {
+                this.updateViewportInfo(overlay, viewport);
+              }
+            });
+          }
+          // 强制更新计算属性，确保按钮状态正确
+          this.$forceUpdate();
+        });
+      },
+      immediate: false
+    },
+    // 监听当前系列变化，确保按钮状态更新（使用函数形式）
+    currentSeries: {
+      handler() {
+        this.$nextTick(() => {
+          this.$forceUpdate();
+        });
+      },
+      deep: true
     }
   },
   async mounted() {
@@ -231,9 +300,19 @@ export default {
     // 自动加载DICOM目录
     this.autoLoadDicomDirectory();
   },
+  /**
+   * 组件销毁前清理资源
+   */
   beforeDestroy() {
+    try {
+      // 清理所有资源
     this.cleanupViewer();
+      
+      // 移除键盘事件监听
     document.removeEventListener('keydown', this.handleKeyboardShortcuts);
+    } catch (error) {
+      // 组件销毁清理失败，静默处理
+    }
   },
   methods: {
     ...mapActions('dicom', [
@@ -243,114 +322,40 @@ export default {
       'selectImage'
     ]),
     ...mapActions('viewer', [
-      'activateTool',
-      'resetViewport',
-      'rotateImage',
-      'flipImage',
-      'fitToWindow',
-      'invertImage',
-      'setWindowLevel',
-      'clearAllMeasurements',
       'activateGridLayout',
       'deactivateGridLayout',
       'selectGridViewport',
       'loadImageToGrid',
-      'startPlayback',
       'stopPlayback',
       'setPlaybackSpeed'
     ]),
 
     /**
-     * 初始化查看器 - 使用改进后的服务类
+     * 初始化查看器 - 默认创建1x1网格视口
      */
-    initializeViewer() {
+    async initializeViewer() {
       try {
         ipcRenderer.send('maximize-window');
         
-        // 使用改进后的服务类
-        cornerstoneService.enableElement(this.$refs.dicomViewer);
+        // 初始化1x1网格布局（单视图模式）
+        const layout = { rows: 1, cols: 1, totalSlots: 1 };
+        await this.$store.dispatch('viewer/activateGridLayout', layout);
+        await this.initializeGridView();
       } catch (error) {
         console.error('初始化查看器失败', error);
       }
     },
 
-    /**
-     * 自动加载DICOM目录
-     */
-    async autoLoadDicomDirectory() {
-      try {
-        // 设置超时保护，防止loading状态一直显示
-        const timeoutId = setTimeout(() => {
-          this.$store.commit('dicom/SET_LOADING', false);
-          this.localLoading = false;
-        }, 30000); // 30秒超时
-        
-        // 确保UI更新后再执行配置读取操作
-        await this.$nextTick();
-        
-        // 使用setTimeout确保UI完全更新后再执行配置操作
-        setTimeout(async () => {
-          try {
-            const path = require('path');
-            const fs = require('fs');
-            
-            // 加载DICOM目录 - 使用配置文件管理器
-            const configManager = ConfigManager.getInstance();
-            const config = configManager.getConfig();
-            const dicomPath = configManager.findAvailableDicomDirectory();
-            const isAutoLoadEnabled = configManager.isAutoLoadEnabled();
-        
-            if (dicomPath && isAutoLoadEnabled) {
-              // 更新加载文本（loading状态已在mounted中设置）
-              this.$store.commit('dicom/SET_LOADING_TEXT', '正在扫描DICOM目录...');
-              
-              try {
-                await this.loadDicomDirectory(dicomPath);
-                
-                // 加载完成后显示第一个系列的影像
-                this.$store.commit('dicom/SET_LOADING_TEXT', '正在加载第一个影像...');
-                await this.loadFirstImage();
-                
-                // 最终确保loading状态为false
-                this.$store.commit('dicom/SET_LOADING', false);
-                this.localLoading = false;
-                
-                // 清除超时定时器
-                clearTimeout(timeoutId);
-              } catch (error) {
-                console.error('加载DICOM目录失败:', error);
-                // 发生错误时确保loading状态为false
-                this.$store.commit('dicom/SET_LOADING', false);
-                this.localLoading = false;
-                clearTimeout(timeoutId);
-              }
-            } else {
-              // 确保loading状态为false
-              this.$store.commit('dicom/SET_LOADING', false);
-              this.localLoading = false;
-              clearTimeout(timeoutId);
-            }
-          } catch (error) {
-            console.error('配置读取过程发生错误:', error);
-            // 发生错误时确保loading状态为false
-            this.$store.commit('dicom/SET_LOADING', false);
-            this.localLoading = false;
-            clearTimeout(timeoutId);
-          }
-        }, 50); // 50ms延迟确保UI完全更新
-      } catch (error) {
-        console.error('自动加载过程发生错误:', error);
-        // 发生错误时确保loading状态为false
-        this.$store.commit('dicom/SET_LOADING', false);
-        this.localLoading = false;
-      }
-    },
+
 
     /**
-     * 清理查看器
+     * 清理查看器（完整清理）
      */
     cleanupViewer() {
       try {
+        // 清理播放状态
+        this.cleanupPlayback();
+
         // 清理网格视图
         if (this.isGridViewActive) {
           gridViewService.clearAllViewports(this.$refs.dicomViewer);
@@ -358,656 +363,29 @@ export default {
           gridViewService.deactivateGridLayout();
         }
         
-        // 停止播放
-        if (playbackService.isPlaying()) {
-          playbackService.stopPlayback();
+        // 清理视口信息更新的事件监听器
+        if (typeof this.getGridViewportElements === 'function') {
+          const viewports = this.getGridViewportElements();
+          viewports.forEach(viewport => {
+            if (viewport._infoUpdateHandler) {
+              viewport.removeEventListener('cornerstoneimagerendered', viewport._infoUpdateHandler);
+              viewport.removeEventListener('cornerstonenewimage', viewport._infoUpdateHandler);
+              delete viewport._infoUpdateHandler;
+            }
+          });
         }
         
         // 清理Cornerstone元素
+        if (this.$refs.dicomViewer) {
         cornerstoneService.disableElement(this.$refs.dicomViewer);
-        
-        // console.log('查看器清理完成');
-      } catch (error) {
-        // console.error('清理查看器失败', error);
-        // console.error('清理查看器失败:', error);
-      }
-    },
-
-    /**
-     * 选择目录或文件
-     */
-    async selectPath() {
-      try {
-        const result = await dialog.showOpenDialog({
-          properties: ["openDirectory", "openFile"],
-          filters: [
-            { name: 'DICOM Files', extensions: ['dcm', 'dicom', 'dic', 'ima', ''] },
-            { name: 'All Files', extensions: ['*'] }
-          ]
-        });
-        
-        if (result.filePaths[0]) {
-          const selectedPath = result.filePaths[0];
-          const fs = require('fs');
-          const path = require('path');
-          
-          // 立即显示加载动画 - 在文件对话框选择完成后立即显示
-          this.$store.commit('dicom/SET_LOADING', true);
-          this.$store.commit('dicom/SET_LOADING_TEXT', '正在分析选择的文件...');
-          this.localLoading = true;
-          
-          // 强制立即更新UI，然后异步执行文件检查
-          await this.$nextTick();
-          
-          // 使用setTimeout确保UI完全更新后再执行文件操作
-          setTimeout(async () => {
-            try {
-              // 检查选择的是文件还是目录
-              this.$store.commit('dicom/SET_LOADING_TEXT', '正在检查文件类型...');
-              const stats = fs.statSync(selectedPath);
-              
-              if (stats.isFile()) {
-                // 选择的是单个文件
-                this.$store.commit('dicom/SET_LOADING_TEXT', '正在解析DICOM文件...');
-                await this.loadDicomFile(selectedPath);
-              } else {
-                // 选择的是目录
-                this.$store.commit('dicom/SET_LOADING_TEXT', '正在扫描DICOM目录...');
-                await this.loadDicomDirectory(selectedPath);
-              }
-              
-              this.$store.commit('dicom/SET_LOADING_TEXT', '正在加载第一个影像...');
-          await this.loadFirstImage();
-            } catch (error) {
-              // 加载失败时确保隐藏加载动画
-              this.$store.commit('dicom/SET_LOADING', false);
-              this.localLoading = false;
-              throw error;
-            }
-          }, 50); // 50ms延迟确保UI完全更新
-        }
-      } catch (error) {
-        // 确保在错误时也隐藏加载动画
-        this.$store.commit('dicom/SET_LOADING', false);
-        this.localLoading = false;
-        errorHandler.handleError(error, 'selectPath');
-      }
-    },
-
-    /**
-     * 选择单个文件
-     */
-    async selectFile() {
-      try {
-        const result = await dialog.showOpenDialog({
-          properties: ["openFile"],
-          filters: [
-            { name: 'DICOM Files', extensions: ['dcm', 'dicom', 'dic', 'ima', ''] },
-            { name: 'All Files', extensions: ['*'] }
-          ]
-        });
-        
-        if (result.filePaths[0]) {
-          
-          // 立即显示加载动画 - 在文件对话框选择完成后立即显示
-          this.$store.commit('dicom/SET_LOADING', true);
-          this.$store.commit('dicom/SET_LOADING_TEXT', '正在解析DICOM文件...');
-          this.localLoading = true;
-          
-          // 强制立即更新UI，然后异步执行文件加载
-          await this.$nextTick();
-          
-          // 使用setTimeout确保UI完全更新后再执行文件操作
-          setTimeout(async () => {
-            try {
-              await this.loadDicomFile(result.filePaths[0]);
-              
-              this.$store.commit('dicom/SET_LOADING_TEXT', '正在加载第一个影像...');
-              await this.loadFirstImage();
-            } catch (error) {
-              // 加载失败时确保隐藏加载动画
-              this.$store.commit('dicom/SET_LOADING', false);
-              this.localLoading = false;
-              throw error;
-            }
-          }, 50); // 50ms延迟确保UI完全更新
-        }
-      } catch (error) {
-        console.error('选择文件失败:', error);
-        errorHandler.handleError(error, 'selectFile');
-      }
-    },
-
-    /**
-     * 选择序列
-     */
-    async selectSeries(index) {
-      try {
-        await this.selectDicomSeries(index);
-        
-        if (this.isGridViewActive) {
-          // 在网格模式下，加载到下一个空视口
-          const nextEmptyViewport = gridViewService.getNextEmptyViewport();
-          if (nextEmptyViewport) {
-            const gridState = gridViewService.getGridState();
-            const viewportIndex = gridState.viewports.findIndex(vp => vp.id === nextEmptyViewport.id);
-            await this.loadCurrentImageToGrid(viewportIndex);
-          }
-        } else {
-          // 在单视图模式下，正常加载
-        await this.loadCurrentImage();
-        }
-      } catch (error) {
-        errorHandler.handleError(error, 'selectSeries');
-      }
-    },
-
-    /**
-     * 加载第一张图像
-     */
-    async loadFirstImage() {
-      try {
-        // 检查是否有可用的系列
-        const seriesCount = this.$store.state.dicom.dicomSeries.length;
-        if (seriesCount === 0) {
-          // 确保loading状态为false
-          this.$store.commit('dicom/SET_LOADING', false);
-          this.localLoading = false;
-          return;
         }
         
-        // 确保第一个系列被选中
-        if (this.$store.state.dicom.activeSeriesIndex !== 0) {
-          this.$store.commit('dicom/SET_ACTIVE_SERIES', 0);
-        }
-        
-        // 加载当前图像
-        await this.loadCurrentImage();
-        
-        // 检查是否为动态影像，如果是则显示动态播放选项
-        const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
-        const cineInfo = this.$store.state.dicom.cineInfo;
-        const currentCineImagePath = this.$store.state.dicom.currentCineImagePath;
-        
-        if (isDynamicSeries && cineInfo && currentCineImagePath) {
-          // 显示动态影像提示，但不自动播放
-          this.$message({
-            message: `检测到动态影像 (${cineInfo.frameCount}帧)，可使用播放控制进行帧播放`,
-            type: 'info',
-            duration: 3000
-          });
-        }
-        
-        // 确保loading状态为false
-        this.$store.commit('dicom/SET_LOADING', false);
-        this.localLoading = false;
       } catch (error) {
-        console.error('加载第一个图像失败:', error);
-        // 发生错误时确保loading状态为false
-        this.$store.commit('dicom/SET_LOADING', false);
-        this.localLoading = false;
+        // 清理查看器失败，静默处理
       }
     },
 
-    /**
-     * 开始真正的动态影像播放
-     */
-    async startCinePlayback() {
-      try {
-        
-        const cineInfo = this.$store.state.dicom.cineInfo;
-        const currentCineImagePath = this.$store.state.dicom.currentCineImagePath;
-        
-        if (!cineInfo || !currentCineImagePath) {
-          console.error('动态影像信息不完整');
-          return;
-        }
 
-        const element = this.$refs.dicomViewer;
-        if (!element) {
-          console.error('找不到DICOM查看器元素');
-          return;
-        }
-
-        // 确保图像加载器已注册
-        await this.$cornerstoneService.ensureImageLoaderRegistered();
-        
-        // 构建图像ID
-        const imageId = `wadouri:${currentCineImagePath}`;
-        
-
-        // 开始动态影像播放
-        cinePlaybackService.startCinePlayback(element, imageId, cineInfo, {
-          speed: 10, // 默认速度
-          direction: 'forward'
-        });
-        
-        // 更新Vuex状态
-        this.$store.dispatch('viewer/startPlayback');
-        
-        
-        // 显示播放控制提示
-        this.$message({
-          message: `动态影像播放已开始 (${cineInfo.frameCount}帧, ${cineInfo.type})`,
-          type: 'success',
-          duration: 3000
-        });
-        
-      } catch (error) {
-        console.error('动态影像播放失败:', error);
-        errorHandler.handleError(error, 'startCinePlayback');
-      }
-    },
-
-    /**
-     * 自动开始播放动态影像（旧的逻辑，保留兼容性）
-     */
-    async startAutoPlayback() {
-      try {
-        
-        const currentSeries = this.$store.getters['dicom/currentSeries'];
-        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
-          console.error('没有可用的图像');
-          return;
-        }
-
-        // 构建图像ID列表
-        const imageIds = [];
-        const findDicomFiles = (node) => {
-          console.log('🔍 检查节点:', {
-            name: node.name,
-            isFile: node.isFile,
-            fullPath: node.fullPath,
-            path: node.path
-          });
-          
-          if (node.isFile && this.isDicomFile(node.name)) {
-            // 使用新的buildImageId方法，支持帧图像
-            const imageId = this.buildImageId(node);
-            if (imageId) {
-              imageIds.push(imageId);
-              console.log('✅ 添加图像ID:', imageId);
-            } else {
-              console.error('节点没有有效路径:', node);
-            }
-          } else if (node.children) {
-            node.children.forEach(child => findDicomFiles(child));
-          }
-        };
-        findDicomFiles(currentSeries);
-
-        if (imageIds.length === 0) {
-          console.error('没有找到DICOM图像');
-          return;
-        }
-
-        console.log('🎬 找到动态影像数量:', imageIds.length);
-
-        // 设置播放参数（适合动态影像的默认参数）
-        const playbackOptions = {
-          speed: 8, // 较慢的速度，适合医学影像观察
-          direction: 'forward',
-          loop: true,
-          startFrame: 0,
-          endFrame: imageIds.length - 1
-        };
-
-        const element = this.$refs.dicomViewer;
-        if (!element) {
-          console.error('找不到DICOM查看器元素');
-          return;
-        }
-
-        await this.$cornerstoneService.ensureImageLoaderRegistered();
-        playbackService.startPlayback(element, imageIds, playbackOptions);
-        this.$store.dispatch('viewer/startPlayback');
-        
-        console.log('✅ 动态影像自动播放已开始');
-        
-        // 显示播放控制提示
-        this.$message({
-          message: `动态影像自动播放已开始 (${imageIds.length}帧)`,
-          type: 'success',
-          duration: 3000
-        });
-        
-      } catch (error) {
-        console.error('自动播放失败:', error);
-        errorHandler.handleError(error, 'startAutoPlayback');
-      }
-    },
-
-    /**
-     * 加载当前图像 - 使用改进后的服务类
-     */
-    async loadCurrentImage() {
-      try {
-        // console.log('loadCurrentImage被调用');
-        
-        const currentSeries = this.$store.getters['dicom/currentSeries'];
-        // console.log('当前系列:', currentSeries);
-        
-        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
-          // console.log('没有可用的系列或图像');
-          return;
-        }
-
-        // 确保图像加载器已注册
-        await this.$cornerstoneService.ensureImageLoaderRegistered();
-        
-        // 递归查找系列中的所有DICOM文件
-        const imageIds = [];
-        const findDicomFiles = (node) => {
-          // console.log(`检查节点: ${node.name}, isFile: ${node.isFile}, 路径: ${node.path}`);
-          
-          if (node.isFile && node.path) {
-            // 检查是否为DICOM文件（包括无扩展名的情况）
-            const isDicomFile = node.path.toLowerCase().endsWith('.dcm') || 
-                               node.path.toLowerCase().endsWith('.dicom') ||
-                               node.path.toLowerCase().endsWith('.dic') ||
-                               node.path.toLowerCase().endsWith('.ima') ||
-                               // 对于没有扩展名的文件，检查是否在DICOM目录结构中
-                               (node.name.match(/^IMG\d+$/) && node.path.includes('SER'));
-            
-            if (isDicomFile) {
-              // 创建临时节点对象来使用buildImageId方法
-              const tempNode = {
-                isFile: true,
-                path: node.path,
-                fullPath: node.path,
-                isFrame: false
-              };
-              const imageId = this.buildImageId(tempNode);
-              imageIds.push(imageId);
-              // console.log(`找到DICOM文件: ${node.name} -> ${imageId}`);
-            }
-          } else if (node.children) {
-            node.children.forEach(child => findDicomFiles(child));
-          }
-        };
-        
-        findDicomFiles(currentSeries);
-        // console.log('生成的imageIds:', imageIds);
-        
-        if (imageIds.length === 0) {
-          // console.log('没有找到DICOM图像文件');
-          return;
-        }
-        
-        const element = this.$refs.dicomViewer;
-        
-        // 创建stack对象，参考dashboard
-          const stack = {
-            currentImageIdIndex: 0,
-            imageIds
-          };
-          
-        // 加载第一个图像
-        const firstImageId = imageIds[0];
-        // console.log('加载第一个图像:', firstImageId);
-        
-        const image = await this.$cornerstone.loadImage(firstImageId);
-        this.$cornerstone.displayImage(element, image);
-        
-        // 添加stack状态管理器
-        this.$cornerstoneTools.addStackStateManager(element, ['stack']);
-        this.$cornerstoneTools.addToolState(element, 'stack', stack);
-        
-        // 添加滚动工具
-        const StackScrollMouseWheelTool = this.$cornerstoneTools.StackScrollMouseWheelTool;
-        this.$cornerstoneTools.addTool(StackScrollMouseWheelTool);
-        this.$cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
-        
-        // console.log('图像加载成功');
-      } catch (error) {
-        // console.error('loadCurrentImage失败:', error);
-      }
-    },
-
-    /**
-     * 工具栏事件处理 - 基于dashboard的成功模式
-     */
-    async activateTool({ toolName, actionId }) {
-      try {
-        // console.log('activateTool被调用:', { toolName, actionId });
-        
-        if (this.activeAction === actionId) {
-          return;
-        }
-        
-        this.activeAction = actionId;
-        this.active2 = 0;
-        
-        // 直接使用cornerstoneTools激活工具，就像dashboard一样
-        switch (actionId) {
-          case 11: // 缩放
-            this.mode = '3';
-            this.$cornerstoneTools.setToolActive('Zoom', { mouseButtonMask: 1 });
-            break;
-          case 12: // 平移
-            this.mode = '2';
-            this.$cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 1 });
-            break;
-          case 13: // 像素值
-            this.mode = '5';
-            this.$cornerstoneTools.setToolActive('Probe', { mouseButtonMask: 1 });
-            break;
-          case 14: // 窗宽窗位
-            this.mode = '4';
-            this.$cornerstoneTools.setToolActive('Wwwc', { mouseButtonMask: 1 });
-            break;
-          case 15: // 定位线
-            this.mode = '2';
-            this.$cornerstoneTools.setToolActive('Crosshairs', { mouseButtonMask: 1 });
-            break;
-          case 16: // 单张播放 - 实现影像排列第二个按钮的功能（播放控制）
-            this.togglePlayback();
-            break;
-          case 17: // 点距调整
-            this.mode = '1';
-            this.$cornerstoneTools.setToolActive('Length', { mouseButtonMask: 1 });
-            break;
-          case 20: // 选择
-            this.mode = '1';
-            this.$cornerstoneTools.setToolActive('Pan', { mouseButtonMask: 1 });
-            break;
-          case 21: // 长度测量
-            this.mode = '1';
-            this.$cornerstoneTools.setToolActive('Length', { mouseButtonMask: 1 });
-            break;
-          case 22: // 角度测量
-            this.mode = '1';
-            this.$cornerstoneTools.setToolActive('Angle', { mouseButtonMask: 1 });
-            break;
-          case 23: // 面积测量
-            this.mode = '1';
-            this.$cornerstoneTools.setToolActive('RectangleRoi', { mouseButtonMask: 1 });
-            break;
-          default:
-            // console.log('未知的工具ID:', actionId);
-        }
-      } catch (error) {
-        // console.error('activateTool失败:', error);
-        errorHandler.handleError(error, 'activateTool');
-      }
-    },
-
-    async resetViewport() {
-      try {
-        // console.log('resetViewport被调用');
-        const element = this.$refs.dicomViewer;
-        
-        // 基于dashboard的成功模式
-        const viewport = this.$cornerstone.getViewport(element);
-        
-        // 重置窗宽窗位
-        viewport.voi.windowWidth = 400;
-        viewport.voi.windowCenter = 50;
-        
-        // 重置缩放和平移
-        viewport.scale = 1;
-        viewport.translation.x = 0;
-        viewport.translation.y = 0;
-        
-        this.$cornerstone.setViewport(element, viewport);
-        
-        // 清除所有标注数据
-        const toolStateManager = this.$cornerstoneTools.globalImageIdSpecificToolStateManager;
-        toolStateManager.restoreToolState({});
-        
-        // 刷新视图
-        this.$cornerstone.updateImage(element);
-        
-        // console.log('视口重置完成');
-      } catch (error) {
-        // console.error('resetViewport失败:', error);
-        errorHandler.handleError(error, 'resetViewport');
-      }
-    },
-
-    async rotateImage(degrees = 90) {
-      try {
-        // console.log('rotateImage被调用:', degrees);
-        const element = this.$refs.dicomViewer;
-        
-        const viewport = this.$cornerstone.getViewport(element);
-        viewport.rotation = (viewport.rotation + degrees) % 360;
-        this.$cornerstone.setViewport(element, viewport);
-        this.$cornerstone.updateImage(element);
-        
-        // console.log('图像旋转完成');
-      } catch (error) {
-        // console.error('rotateImage失败:', error);
-        errorHandler.handleError(error, 'rotateImage');
-      }
-    },
-
-    async flipImage(direction) {
-      try {
-        // console.log('flipImage被调用:', direction);
-        const element = this.$refs.dicomViewer;
-        
-        const viewport = this.$cornerstone.getViewport(element);
-        if (direction === 'horizontal') {
-          viewport.hflip = !viewport.hflip;
-        } else if (direction === 'vertical') {
-          viewport.vflip = !viewport.vflip;
-        }
-        this.$cornerstone.setViewport(element, viewport);
-        this.$cornerstone.updateImage(element);
-        
-        // console.log('图像翻转完成');
-      } catch (error) {
-        // console.error('flipImage失败:', error);
-        errorHandler.handleError(error, 'flipImage');
-      }
-    },
-
-    async fitToWindow() {
-      try {
-        // console.log('fitToWindow被调用');
-        const element = this.$refs.dicomViewer;
-        
-        this.$cornerstone.fitToWindow(element);
-        this.$cornerstone.updateImage(element);
-        
-        // console.log('适应窗口完成');
-      } catch (error) {
-        // console.error('fitToWindow失败:', error);
-        errorHandler.handleError(error, 'fitToWindow');
-      }
-    },
-
-    async invertImage() {
-      try {
-        // console.log('invertImage被调用');
-        const element = this.$refs.dicomViewer;
-        
-        const viewport = this.$cornerstone.getViewport(element);
-        viewport.invert = !viewport.invert;
-        this.$cornerstone.setViewport(element, viewport);
-        this.$cornerstone.updateImage(element);
-        
-        // console.log('图像反转完成');
-      } catch (error) {
-        // console.error('invertImage失败:', error);
-        errorHandler.handleError(error, 'invertImage');
-      }
-    },
-
-    async setWindowLevel(index) {
-      try {
-        // console.log('setWindowLevel被调用:', index);
-        const element = this.$refs.dicomViewer;
-        
-        if (this.cwImgs[index]) {
-          const preset = this.cwImgs[index];
-          const viewport = this.$cornerstone.getViewport(element);
-          viewport.voi.windowWidth = preset.ww;
-          viewport.voi.windowCenter = preset.wc;
-          this.$cornerstone.setViewport(element, viewport);
-          this.$cornerstone.updateImage(element);
-          // console.log('窗宽窗位设置完成:', preset);
-        }
-      } catch (error) {
-        // console.error('setWindowLevel失败:', error);
-        errorHandler.handleError(error, 'setWindowLevel');
-      }
-    },
-
-    async clearMeasurements() {
-      try {
-        // console.log('clearMeasurements被调用');
-        const element = this.$refs.dicomViewer;
-        
-        const toolStateManager = this.$cornerstoneTools.globalImageIdSpecificToolStateManager;
-        toolStateManager.restoreToolState({});
-        this.$cornerstone.updateImage(element);
-        
-        // console.log('测量清除完成');
-      } catch (error) {
-        // console.error('clearMeasurements失败:', error);
-        errorHandler.handleError(error, 'clearMeasurements');
-      }
-    },
-
-    /**
-     * 显示图像信息
-     */
-    showImageInfo() {
-      // console.log('showImageInfo被调用');
-      try {
-        // 调用ImageInfo组件的show方法，传递当前活动的系列索引
-        const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex || 0;
-        this.$refs.imageInfo.show(activeSeriesIndex);
-        // console.log('图像信息对话框已打开');
-      } catch (error) {
-        // console.error('显示图像信息失败:', error);
-        this.$message.error('显示图像信息失败');
-      }
-    },
-
-    /**
-     * 获取鼠标光标路径
-     */
-    getCursorPath(filename) {
-      if (process.env.NODE_ENV === 'development') {
-        return 'static/cursors/' + filename;
-      } else {
-        // 使用跨平台路径工具
-        return PathUtils.getResourcePath(path.join('cursors', filename));
-      }
-    },
-
-    /**
-     * 窗宽窗位切换
-     */
-    cwChange(index) {
-      this.active2 = index;
-      this.cwShow = false;
-      this.activateTool({ toolName: 'Wwwc', actionId: 14 });
-      this.setWindowLevel(index);
-    },
 
     /**
      * 关闭应用
@@ -1017,608 +395,54 @@ export default {
     },
 
     /**
-     * 切换网格布局
+     * 处理关闭播放控制台事件
      */
-    async toggleGridLayout() {
-      if (this.isGridViewActive) {
-        await this.deactivateGridLayout();
-        this.closeGridLayoutSelector();
-      } else {
-        this.showGridLayoutSelector = true;
+    handleClosePlaybackConsole() {
+      // 直接调用 mixin 中的 closePlaybackConsole 方法
+      // 该方法会停止播放并隐藏控制台
+      // 注意：由于 mixin 方法会设置 this.showPlaybackConsole = false
+      // 我们需要确保组件中有这个属性（已经在 data 中定义）
+      this.showPlaybackConsole = false;
+      // 停止播放
+      this.stopPlayback();
+    },
+
+    /**
+     * 处理播放控制台上一张
+     */
+    handlePlaybackPrevious() {
+      this.previousImage();
+    },
+
+    /**
+     * 处理播放控制台下一张
+     */
+    handlePlaybackNext() {
+      this.nextImage();
+    },
+
+    /**
+     * 处理播放控制台播放/暂停
+     */
+    handlePlaybackPlayPause() {
+      this.togglePlayPause();
+    },
+
+    /**
+     * 处理播放控制台速度变化
+     */
+    handlePlaybackSpeedChange(speed) {
+      this.$store.dispatch('viewer/setPlaybackSpeed', speed);
+      // 如果正在播放，更新播放速度
+      const playbackService = require('../../services/PlaybackService').playbackService;
+      if (playbackService.isPlaying() || this.isPlaybackPlaying) {
+        playbackService.setPlaybackSpeed(speed);
       }
     },
 
-    /**
-     * 应用网格布局
-     */
-    async applyGridLayout(layout) {
-      try {
-        await this.activateGridLayout(layout);
-        await this.initializeGridView();
-        this.closeGridLayoutSelector();
-      } catch (error) {
-        errorHandler.handleError(error, 'applyGridLayout');
-      }
-    },
 
-    /**
-     * 关闭网格布局
-     */
-    async deactivateGridLayout() {
-      try {
-        const element = this.$refs.dicomViewer;
-        
-        // 清理网格视图
-        gridViewService.clearAllViewports(element);
-        gridViewService.clearGridStyles(element);
-        gridViewService.deactivateGridLayout();
-        
-        // 更新状态
-        await this.$store.dispatch('viewer/deactivateGridLayout');
-        
-        // 重新加载当前图像到单视图模式
-        await this.loadCurrentImage();
-        
-        // console.log('网格布局已关闭');
-      } catch (error) {
-        errorHandler.handleError(error, 'deactivateGridLayout');
-      }
-    },
 
-    /**
-     * 关闭网格布局选择器
-     */
-    closeGridLayoutSelector() {
-      this.showGridLayoutSelector = false;
-    },
 
-    /**
-     * 初始化网格视图
-     */
-    async initializeGridView() {
-      try {
-        const element = this.$refs.dicomViewer;
-        const layout = this.$store.state.viewer.gridViewState.layout;
-        
-        // console.log('初始化网格视图，布局:', layout);
-        // console.log('可用系列数量:', this.$store.state.dicom.dicomSeries.length);
-        
-        // 应用网格样式
-        this.applyGridStyles(element, layout);
-        
-        // 加载多个系列到网格中
-        await this.loadMultipleSeriesToGrid(layout);
-        
-        // console.log('网格视图初始化完成');
-      } catch (error) {
-        errorHandler.handleError(error, 'initializeGridView');
-      }
-    },
-
-    /**
-     * 应用网格样式
-     */
-    applyGridStyles(element, layout) {
-      const { rows, cols } = layout;
-      
-      // 设置网格容器样式
-      element.style.display = 'grid';
-      element.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-      element.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-      element.style.gap = '2px';
-      element.style.padding = '2px';
-      element.style.backgroundColor = '#000';
-      
-      // 创建网格视口
-      this.createGridViewports(rows, cols);
-    },
-
-    /**
-     * 创建网格视口
-     */
-    createGridViewports(rows, cols) {
-      const element = this.$refs.dicomViewer;
-      
-      // 清除现有的视口
-      element.innerHTML = '';
-      
-      // 创建网格视口
-      for (let i = 0; i < rows * cols; i++) {
-        const viewport = document.createElement('div');
-        viewport.className = 'grid-viewport';
-        viewport.style.backgroundColor = '#222';
-        viewport.style.border = '1px solid #444';
-        viewport.style.position = 'relative';
-        viewport.style.cursor = 'pointer';
-        
-        // 添加视口索引
-        viewport.dataset.viewportIndex = i;
-        
-        // 添加点击事件
-        viewport.addEventListener('click', () => {
-          this.selectGridViewport(i);
-        });
-        
-        element.appendChild(viewport);
-      }
-    },
-
-    /**
-     * 加载多个系列到网格
-     */
-    async loadMultipleSeriesToGrid(layout) {
-      try {
-        const { rows, cols } = layout;
-        const totalSlots = rows * cols;
-        const availableSeries = this.$store.state.dicom.dicomSeries;
-        
-        // console.log(`加载 ${Math.min(totalSlots, availableSeries.length)} 个系列到网格`);
-        
-        // 为每个视口加载对应的系列
-        for (let i = 0; i < Math.min(totalSlots, availableSeries.length); i++) {
-          const series = availableSeries[i];
-          const viewport = this.$refs.dicomViewer.children[i];
-          
-          if (viewport && series && series.children.length > 0) {
-            // 获取系列的第一张图像
-            const firstImage = series.children[0];
-            const imageId = this.buildImageId(firstImage);
-            
-            // console.log(`加载系列 ${i} 到视口 ${i}:`, series.name);
-            
-            // 启用Cornerstone元素
-            this.$cornerstone.enable(viewport);
-            
-            // 加载图像
-            try {
-              const image = await this.$cornerstone.loadImage(imageId);
-              this.$cornerstone.displayImage(viewport, image);
-              
-              // 添加系列信息标签
-              this.addSeriesInfoLabel(viewport, series, i);
-              
-            } catch (error) {
-              // console.error(`加载系列 ${i} 失败:`, error);
-            }
-          }
-        }
-        
-        // 默认选择第一个视口
-        if (totalSlots > 0) {
-          this.selectGridViewport(0);
-        }
-        
-      } catch (error) {
-        // console.error('加载多个系列到网格失败:', error);
-      }
-    },
-
-    /**
-     * 添加系列信息标签
-     */
-    addSeriesInfoLabel(viewport, series, index) {
-      const label = document.createElement('div');
-      label.className = 'series-info-label';
-      label.style.position = 'absolute';
-      label.style.top = '5px';
-      label.style.left = '5px';
-      label.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-      label.style.color = '#fff';
-      label.style.padding = '2px 6px';
-      label.style.fontSize = '12px';
-      label.style.borderRadius = '3px';
-      label.style.zIndex = '10';
-      label.textContent = `S${index + 1}: ${series.name}`;
-      
-      viewport.appendChild(label);
-    },
-
-    /**
-     * 选择网格视口
-     */
-    selectGridViewport(viewportIndex) {
-      // 清除所有视口的选中状态
-      const viewports = this.$refs.dicomViewer.children;
-      for (let i = 0; i < viewports.length; i++) {
-        viewports[i].classList.remove('selected');
-      }
-      
-      // 选中当前视口
-      if (viewports[viewportIndex]) {
-        viewports[viewportIndex].classList.add('selected');
-        
-        // 更新选中的系列
-        const availableSeries = this.$store.state.dicom.dicomSeries;
-        if (viewportIndex < availableSeries.length) {
-          this.$store.dispatch('dicom/selectDicomSeries', viewportIndex);
-          // console.log(`选中视口 ${viewportIndex}，对应系列: ${availableSeries[viewportIndex].name}`);
-        }
-      }
-    },
-
-    /**
-     * 加载当前图像到网格
-     */
-    async loadCurrentImageToGrid(viewportIndex = 0) {
-      try {
-        if (this.currentImageIds.length > 0) {
-          const element = this.$refs.dicomViewer;
-          await gridViewService.loadImageToViewport(
-            viewportIndex,
-            this.currentImageIds[0],
-            element,
-            this.$store.state.dicom.activeSeriesIndex,
-            0
-          );
-          await this.selectGridViewport(viewportIndex);
-        }
-      } catch (error) {
-        errorHandler.handleError(error, 'loadCurrentImageToGrid');
-      }
-    },
-
-    /**
-     * 切换播放控制 - 完全重新设计
-     */
-    togglePlayback() {
-      
-      // 检查是否为动态影像
-      const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
-      
-      // 所有影像都可以单张播放，动态影像额外支持帧播放
-      if (isDynamicSeries) {
-        // 动态影像：可以选择单张播放或帧播放
-        const cineInfo = this.$store.state.dicom.cineInfo;
-        if (cineInfo) {
-          this.$message({
-            message: `检测到动态影像 (${cineInfo.frameCount}帧)，将播放所有图像文件`,
-            type: 'info',
-            duration: 2000
-          });
-        }
-      }
-
-      // 获取当前状态
-      const isPlaying = playbackService.isPlaying();
-      const isPaused = playbackService.isPaused();
-      const dialogOpen = this.showPlaybackDialog;
-      
-      // 状态处理逻辑
-      if (dialogOpen) {
-        // 情况1: 对话框已打开 -> 关闭对话框
-        this.closePlaybackDialog();
-      } else if (isPlaying) {
-        // 情况2: 正在播放 -> 暂停播放
-        this.pausePlayback();
-      } else if (isPaused) {
-        // 情况3: 已暂停 -> 恢复播放
-        this.resumePlayback();
-      } else {
-        // 情况4: 未播放或已停止 -> 显示播放对话框
-        this.showPlaybackDialog = true;
-      }
-    },
-
-    /**
-     * 开始播放
-     */
-    async startPlayback(playbackOptions) {
-      try {
-        
-        // 检查是否为动态影像且选择了帧播放模式
-        const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
-        const cineInfo = this.$store.state.dicom.cineInfo;
-        const currentCineImagePath = this.$store.state.dicom.currentCineImagePath;
-        
-        if (isDynamicSeries && cineInfo && currentCineImagePath && playbackOptions.mode === 'frame') {
-          // 启动动态影像帧播放
-          await this.startCinePlayback();
-          this.closePlaybackDialog();
-          return;
-        }
-        
-        // 普通单张播放（包括动态影像的单张播放模式）
-        const currentSeries = this.$store.getters['dicom/currentSeries'];
-        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
-          console.error('没有可用的图像');
-          this.$message.error('没有可用的图像');
-          this.closePlaybackDialog();
-          return;
-        }
-
-        // 构建图像ID列表
-        const imageIds = [];
-        const findDicomFiles = (node) => {
-          if (node.isFile && this.isDicomFile(node.name)) {
-            // 使用新的buildImageId方法，支持帧图像
-            const imageId = this.buildImageId(node);
-            if (imageId) {
-              imageIds.push(imageId);
-            } else {
-              console.error('节点没有有效路径:', node);
-            }
-          } else if (node.children) {
-            node.children.forEach(child => findDicomFiles(child));
-          }
-        };
-        
-        findDicomFiles(currentSeries);
-        
-        if (imageIds.length === 0) {
-          console.error('没有找到DICOM图像');
-          this.$message.error('没有找到DICOM图像');
-          this.closePlaybackDialog();
-          return;
-        }
-
-        console.log('🎬 找到图像数量:', imageIds.length);
-
-        const element = this.$refs.dicomViewer;
-        
-        // 确保图像加载器已注册
-        await this.$cornerstoneService.ensureImageLoaderRegistered();
-        
-        // 开始播放
-        playbackService.startPlayback(element, imageIds, {
-          speed: playbackOptions.speed,
-          direction: playbackOptions.direction,
-          startFrame: playbackOptions.startFrame,
-          endFrame: playbackOptions.endFrame,
-          loop: playbackOptions.loop
-        });
-
-        // 更新Vuex状态
-        this.$store.dispatch('viewer/startPlayback');
-        
-        // 关闭对话框
-        this.closePlaybackDialog();
-        
-      } catch (error) {
-        console.error('开始播放失败:', error);
-        errorHandler.handleError(error, 'startPlayback');
-        this.$message.error('播放启动失败');
-        this.closePlaybackDialog();
-      }
-    },
-
-    /**
-     * 暂停播放
-     */
-    pausePlayback() {
-      try {
-        playbackService.pausePlayback();
-        // 暂停时不调用stopPlayback，保持播放状态但标记为暂停
-        this.$store.dispatch('viewer/pausePlayback');
-      } catch (error) {
-        console.error('暂停播放失败:', error);
-        errorHandler.handleError(error, 'pausePlayback');
-      }
-    },
-
-    /**
-     * 恢复播放
-     */
-    resumePlayback() {
-      try {
-        // 获取当前图像ID列表
-        const currentSeries = this.$store.getters['dicom/currentSeries'];
-        if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
-          console.error('没有可用的图像');
-          this.$message.error('没有可用的图像');
-          return;
-        }
-
-        // 构建图像ID列表
-        const imageIds = [];
-        const findDicomFiles = (node) => {
-          if (node.isFile && this.isDicomFile(node.name)) {
-            // 使用新的buildImageId方法，支持帧图像
-            const imageId = this.buildImageId(node);
-            if (imageId) {
-              imageIds.push(imageId);
-            } else {
-              console.error('节点没有有效路径:', node);
-            }
-          } else if (node.children) {
-            node.children.forEach(child => findDicomFiles(child));
-          }
-        };
-        
-        findDicomFiles(currentSeries);
-        
-        if (imageIds.length === 0) {
-          console.error('没有找到DICOM图像');
-          this.$message.error('没有找到DICOM图像');
-          return;
-        }
-
-        const element = this.$refs.dicomViewer;
-        playbackService.resumePlayback(element, imageIds);
-        this.$store.dispatch('viewer/startPlayback');
-        
-      } catch (error) {
-        console.error('恢复播放失败:', error);
-        errorHandler.handleError(error, 'resumePlayback');
-      }
-    },
-
-    /**
-     * 关闭播放控制对话框
-     */
-    closePlaybackDialog() {
-      this.showPlaybackDialog = false;
-    },
-
-    /**
-     * 停止播放
-     */
-    async stopPlayback() {
-      try {
-        playbackService.stopPlayback();
-        await this.$store.dispatch('viewer/stopPlayback'); // 更新状态
-      } catch (error) {
-        errorHandler.handleError(error, 'stopPlayback');
-      }
-    },
-
-    /**
-     * 设置键盘快捷键
-     */
-    setupKeyboardShortcuts() {
-      document.addEventListener('keydown', this.handleKeyboardShortcuts);
-    },
-
-    /**
-     * 处理键盘快捷键
-     */
-    handleKeyboardShortcuts(event) {
-      // 如果焦点在输入框中，不处理快捷键
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-      }
-
-      switch (event.code) {
-        case 'Space':
-          event.preventDefault();
-          this.togglePlayback();
-          break;
-        case 'KeyG':
-          event.preventDefault();
-          this.toggleGridLayout();
-          break;
-        case 'KeyR':
-          event.preventDefault();
-          this.resetViewport();
-          break;
-        case 'Escape':
-          event.preventDefault();
-          this.closeGridLayoutSelector();
-          this.closePlaybackDialog();
-          break;
-        case 'ArrowLeft':
-          event.preventDefault();
-          this.previousImage();
-          break;
-        case 'ArrowRight':
-          event.preventDefault();
-          this.nextImage();
-          break;
-      }
-    },
-
-    /**
-     * 下一张图像
-     */
-    async nextImage() {
-      try {
-        await this.$store.dispatch('dicom/nextImage');
-        await this.loadCurrentImage();
-      } catch (error) {
-        errorHandler.handleError(error, 'nextImage');
-      }
-    },
-
-    /**
-     * 上一张图像
-     */
-    async previousImage() {
-      try {
-        await this.$store.dispatch('dicom/previousImage');
-        await this.loadCurrentImage();
-      } catch (error) {
-        errorHandler.handleError(error, 'previousImage');
-      }
-    },
-
-    /**
-     * 暂停动态影像播放
-     */
-    pauseCinePlayback() {
-      try {
-        cinePlaybackService.pauseCinePlayback();
-        // 暂停时不调用stopPlayback，保持播放状态但标记为暂停
-        this.$store.dispatch('viewer/pausePlayback');
-      } catch (error) {
-        console.error('暂停动态影像播放失败:', error);
-        errorHandler.handleError(error, 'pauseCinePlayback');
-      }
-    },
-
-    /**
-     * 恢复动态影像播放
-     */
-    resumeCinePlayback() {
-      try {
-        cinePlaybackService.resumeCinePlayback();
-        this.$store.dispatch('viewer/startPlayback');
-      } catch (error) {
-        console.error('恢复动态影像播放失败:', error);
-        errorHandler.handleError(error, 'resumeCinePlayback');
-      }
-    },
-
-    /**
-     * 停止动态影像播放
-     */
-    stopCinePlayback() {
-      try {
-        cinePlaybackService.stopCinePlayback();
-        this.$store.dispatch('viewer/stopPlayback');
-      } catch (error) {
-        console.error('停止动态影像播放失败:', error);
-        errorHandler.handleError(error, 'stopCinePlayback');
-      }
-    },
-
-    /**
-     * 停止普通播放
-     */
-    stopPlayback() {
-      try {
-        playbackService.stopPlayback();
-        this.$store.dispatch('viewer/stopPlayback');
-        // 重置对话框状态，确保下次点击可以显示对话框
-        this.showPlaybackDialog = false;
-      } catch (error) {
-        console.error('停止播放失败:', error);
-        errorHandler.handleError(error, 'stopPlayback');
-      }
-    },
-
-    /**
-     * 显示动态影像设置
-     */
-    showCineSettings() {
-      const frameInfo = cinePlaybackService.getCurrentFrameInfo();
-      this.$message({
-        message: `当前帧: ${frameInfo.currentFrame + 1}/${frameInfo.totalFrames}, 速度: ${frameInfo.speed} FPS`,
-        type: 'info',
-        duration: 2000
-      });
-    },
-
-    /**
-     * 检测是否为DICOM文件
-     */
-    isDicomFile(fileName) {
-      const dicomService = this.$dicomService;
-      return dicomService.isDicomFile(fileName);
-    },
-
-    /**
-     * 构建图像ID，支持帧图像
-     */
-    buildImageId(node) {
-      if (node.isFrame && node.parentCineImage) {
-        // 帧图像：使用 wadouri:path?frame=N 格式
-        const basePath = node.parentCineImage.fullPath || node.parentCineImage.path;
-        return `wadouri:${basePath}?frame=${node.frameIndex}`;
-      } else {
-        // 普通图像：使用 wadouri:path 格式
-        const imagePath = node.fullPath || node.path;
-        return `wadouri:${imagePath}`;
-      }
-    },
 
   }
 };
@@ -1628,6 +452,201 @@ export default {
 // 全局样式，防止页面滚动
 body {
   overflow: hidden;
+}
+
+// 网格容器样式（非scoped，适用于动态创建的DOM）
+#dicomViewer.grid-active {
+  display: grid;
+  gap: 4px;
+  padding: 4px;
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+  border: 1px solid #2a2a2a;
+  
+  // 隐藏主视图的 canvas（如果存在）
+  > canvas {
+    display: none !important;
+  }
+}
+
+// 网格视口通用样式
+.grid-viewport {
+  background: transparent;
+  border: 2px solid #2a2a2a;
+  position: relative;
+  cursor: inherit; // 继承父容器的 cursor 样式（动态根据工具改变）
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+  outline: none;
+  overflow: hidden;
+  border-radius: 2px;
+
+  &:hover:not(.selected) {
+    border-color: #444;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  }
+
+  &.selected {
+    border: 3px solid #ff0000 !important;
+    box-shadow:
+      0 0 0 1px #ff0000,
+      0 0 15px rgba(255, 0, 0, 0.8),
+      0 0 30px rgba(255, 0, 0, 0.5) !important;
+    z-index: 10 !important;
+    position: relative;
+    animation: gridPulse 2s ease-in-out infinite;
+  }
+
+  canvas {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    width: 100% !important;
+    height: 100% !important;
+    pointer-events: auto;
+    z-index: 1;
+  }
+
+  .series-info-label {
+    z-index: 100 !important;
+    position: absolute;
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 3px 8px;
+    font-size: 12px;
+    border-radius: 3px;
+    pointer-events: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  &.selected .series-info-label {
+    background-color: rgba(255, 0, 0, 0.9);
+    border-color: #ff0000;
+    color: #fff;
+    font-weight: bold;
+  }
+  
+  // 网格视口信息覆盖层样式
+  .grid-image-info-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 999;
+    
+    .top_info {
+      position: absolute;
+      
+      .top_info_item {
+        color: #fff;
+        font-size: 13px;
+        line-height: 20px;
+      }
+    }
+    
+    .top_info1 {
+      top: 0px;
+      left: 4px;
+    }
+    
+    .top_info2 {
+      top: 0px;
+      right: 4px;
+      text-align: right;
+    }
+    
+    .top_info3 {
+      bottom: 15px;
+      right: 4px;
+      text-align: right;
+    }
+    
+    .top_x {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      
+      .top_x_lines {
+        border-bottom: 1px solid #fff;
+        gap: 10px;
+        display: flex;
+        flex-direction: row;
+        align-items: flex-end;
+        justify-content: center;
+        
+        .top_x_line {
+          width: 1px;
+          height: 4px;
+          background-color: #fff;
+        }
+        
+        .top_x_line1 {
+          height: 8px;
+        }
+      }
+      
+      .top_x_text {
+        color: #fff;
+        font-size: 13px;
+        padding-top: 6px;
+        text-align: center;
+      }
+    }
+    
+    .top_y {
+      position: absolute;
+      top: 50%;
+      right: 4px;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      
+      .top_y_lines {
+        border-right: 1px solid #fff;
+        gap: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        
+        .top_y_line {
+          width: 4px;
+          height: 1px;
+          background-color: #fff;
+        }
+        
+        .top_y_line1 {
+          width: 8px;
+        }
+      }
+      
+      .top_y_text {
+        color: #fff;
+        font-size: 13px;
+        padding-left: 10px;
+        text-align: center;
+      }
+    }
+  }
+}
+
+@keyframes gridPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px #ff0000,
+      0 0 15px rgba(255, 0, 0, 0.8),
+      0 0 30px rgba(255, 0, 0, 0.5),
+      inset 0 0 20px rgba(255, 0, 0, 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px #ff0000,
+      0 0 25px rgba(255, 0, 0, 1),
+      0 0 50px rgba(255, 0, 0, 0.7),
+      inset 0 0 30px rgba(255, 0, 0, 0.25);
+  }
 }
 </style>
 
@@ -1686,24 +705,6 @@ body {
   }
 }
 
-// 网格视口样式
-.grid-viewport {
-  background-color: #222;
-  border: 1px solid #444;
-  position: relative;
-  cursor: pointer;
-  transition: border-color 0.2s ease;
-
-  &:hover {
-    border-color: #666;
-  }
-
-  &.selected {
-    border: 2px solid #00C325;
-    box-shadow: 0 0 10px rgba(0, 195, 37, 0.5);
-  }
-}
-
 // 系列信息标签样式
 .series-info-label {
   position: absolute;
@@ -1755,73 +756,27 @@ body {
   color: #fff;
 }
 
+.series-progress-bar {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  background-color: rgba(0, 0, 0, 0.8);
+  padding: 8px 16px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.series-progress-text {
+  color: #fff;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
 
-/* 播放控制样式 */
-.playback-controls {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.8);
-  border-radius: 8px;
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
-
-  .playback-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: white;
-    font-size: 12px;
-
-    .playback-status {
-      font-weight: 500;
-      color: #409EFF;
-    }
-
-    .playback-speed {
-      color: #ccc;
-    }
-  }
-
-  .playback-buttons {
-    display: flex;
-    gap: 8px;
-
-    .el-button {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: white;
-      font-size: 12px;
-      padding: 6px 12px;
-      border-radius: 4px;
-      transition: all 0.3s ease;
-
-      &:hover {
-        background: rgba(255, 255, 255, 0.2);
-        border-color: rgba(255, 255, 255, 0.4);
-      }
-
-      &.el-button--primary {
-        background: #409EFF;
-        border-color: #409EFF;
-
-        &:hover {
-          background: #66b1ff;
-          border-color: #66b1ff;
-        }
-      }
-    }
-  }
-}
 </style>

@@ -168,6 +168,16 @@ export class CornerstoneService {
   }
 
   /**
+   * 确保 StackScrollMouseWheel 工具已注册（工具已在 main.js 中全局注册，此方法仅作备用）
+   */
+  ensureStackScrollMouseWheelTool() {
+    // StackScrollMouseWheel 工具已在 main.js 中全局注册
+    // 该工具不需要全局激活，会在元素启用时自动工作
+    // 如果确实需要激活，可以在这里调用 setToolActive，但通常不需要
+    return true;
+  }
+
+  /**
    * 创建图像堆栈
    */
   createImageStack(imageIds, currentImageIdIndex = 0) {
@@ -175,28 +185,6 @@ export class CornerstoneService {
       imageIds: imageIds,
       currentImageIdIndex: currentImageIdIndex
     };
-  }
-
-  /**
-   * 加载和显示单张图像 - 基于dashboard的成功模式
-   */
-  async loadAndViewImage(element, imageId) {
-    try {
-      // console.log('loadAndViewImage被调用（使用dashboard模式）');
-      // console.log('准备加载图像:', imageId);
-      
-      // 直接使用cornerstone.loadImage和displayImage，就像dashboard一样
-      this.getCornerstone().loadImage(imageId).then((image) => {
-        // console.log('图像加载成功:', image);
-        this.getCornerstone().displayImage(element, image);
-        // console.log('图像显示完成');
-      }).catch((error) => {
-        // console.error('图像加载失败:', error);
-      });
-    } catch (error) {
-      // console.error('加载和显示图像失败:', error);
-      throw error;
-    }
   }
 
   /**
@@ -219,13 +207,9 @@ export class CornerstoneService {
         this.getCornerstoneTools().addStackStateManager(element, ['stack']);
         this.getCornerstoneTools().addToolState(element, 'stack', stack);
         // console.log('图像显示完成');
-      }).catch((error) => {
+      }).catch((error) => { 
         // console.error('图像加载失败:', error);
       });
-      
-      // 添加堆栈滚动工具
-      this.getCornerstoneTools().addTool(StackScrollMouseWheelTool);
-      this.getCornerstoneTools().setToolActive('StackScrollMouseWheel', {});
     } catch (error) {
       // console.error('加载图像堆栈失败:', error);
       throw error;
@@ -406,9 +390,10 @@ export class CornerstoneService {
       
       const image = await this.getCornerstone().loadImage(imageId);
       this.getCornerstone().displayImage(element, image);
-      // console.log('图像加载并显示完成');
     } catch (error) {
-      // console.error('加载并显示图像失败:', error);
+      if (process.env.NODE_ENV === 'development') {
+        console.error('加载并显示图像失败:', error);
+      }
       throw error;
     }
   }

@@ -29,7 +29,7 @@ export default {
     // 选择路径
     selectPath() {
       if (that.$store.state.app.directory) {
-        that.$router.push('/dashboard')
+        that.$router.push('/')
         return
       }
       dialog
@@ -40,7 +40,7 @@ export default {
           if (res.filePaths[0]) {
             that.targetDirectory = res.filePaths[0]
             that.$store.dispatch('setDirectory', that.targetDirectory)
-            that.$router.push('/dashboard')
+            that.$router.push('/')
           }
         });
     },

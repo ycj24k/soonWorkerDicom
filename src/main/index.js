@@ -26,9 +26,16 @@ function createWindow () {
     show: false,
     fullscreen: false,
     webPreferences: {
-      webSecurity: false,
-      nodeIntegration: true,
-      contextIsolation: false
+      // 注意：以下配置降低了安全性，但DICOM查看器需要访问本地文件系统
+      // 在生产环境中，建议考虑使用 IPC 通信和 contextIsolation 来提高安全性
+      webSecurity: false, // 禁用同源策略，允许加载本地文件
+      nodeIntegration: true, // 启用 Node.js API 访问，用于文件系统操作
+      contextIsolation: false // 禁用上下文隔离，与 nodeIntegration 配合使用
+      // 未来改进建议：
+      // 1. 启用 contextIsolation: true
+      // 2. 禁用 nodeIntegration: false
+      // 3. 通过 preload 脚本暴露必要的 API
+      // 4. 使用 IPC 通信处理文件系统操作
     }
   })
   require("@electron/remote/main").initialize();

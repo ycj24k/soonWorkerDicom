@@ -17,7 +17,7 @@ export default {
   mounted() {
     that = this
     setTimeout(() => {
-      that.$router.push('/dashboard')
+      that.$router.push('/')
     }, 2000);
   },
   methods: {

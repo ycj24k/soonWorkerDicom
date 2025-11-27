@@ -84,7 +84,7 @@ class ConfigManager {
       
       return this.config;
     } catch (error) {
-      console.warn('读取配置文件失败，使用默认配置:', error.message);
+      // 读取配置文件失败，使用默认配置
       this.config = { ...this.defaultConfig };
       return this.config;
     }
@@ -166,7 +166,6 @@ DICOM_EXTENSIONS=.dcm,.dicom,.dic,.ima
 MAX_SCAN_DEPTH=10`;
 
       fs.writeFileSync(configPath, defaultContent, 'utf8');
-      console.log('已创建默认配置文件:', configPath);
     } catch (error) {
       console.error('创建默认配置文件失败:', error.message);
     }
@@ -226,32 +225,22 @@ MAX_SCAN_DEPTH=10`;
    * 查找可用的DICOM目录
    */
   findAvailableDicomDirectory() {
-    console.log('🔍 ConfigManager: 开始查找可用的DICOM目录...');
-    
     // 首先尝试主路径
     const mainPath = this.getDefaultDicomPath();
-    console.log('📁 主路径:', mainPath);
     if (fs.existsSync(mainPath)) {
-      console.log('✅ 主路径存在，使用:', mainPath);
       return mainPath;
     }
-    console.log('❌ 主路径不存在');
 
     // 尝试备用路径
     const backupPaths = this.getBackupDicomPaths();
-    console.log('🔍 尝试备用路径:', backupPaths);
     for (const backupPath of backupPaths) {
       if (fs.existsSync(backupPath)) {
-        console.log('✅ 备用路径存在，使用:', backupPath);
         return backupPath;
       }
     }
-    console.log('❌ 所有备用路径都不存在');
 
     // 如果都没找到，使用默认的目录查找逻辑
-    console.log('🔄 使用默认目录查找逻辑...');
     const defaultPath = this.findDicomDirectory();
-    console.log('📁 默认查找结果:', defaultPath);
     return defaultPath;
   }
 

@@ -41,7 +41,8 @@ const state = {
     speed: 10, // 默认10帧/秒
     currentFrame: 0,
     totalFrames: 0,
-    direction: 'forward'
+    direction: 'forward',
+    playbackType: 'none' // 播放类型：'none' | 'regular' | 'cine'
   },
   // 显示设置
   showImageInfo: true,
@@ -86,19 +87,38 @@ const mutations = {
     state.playbackControl = { ...state.playbackControl, ...control };
   },
 
-  START_PLAYBACK(state) {
+  START_PLAYBACK(state, payload) {
     state.playbackControl.isPlaying = true;
     state.playbackControl.isPaused = false;
+    // 设置播放类型
+    if (payload && payload.type) {
+      state.playbackControl.playbackType = payload.type; // 'regular' 或 'cine'
+    }
   },
 
-  STOP_PLAYBACK(state) {
+  STOP_PLAYBACK(state, payload) {
     state.playbackControl.isPlaying = false;
     state.playbackControl.isPaused = false;
+    state.playbackControl.currentFrame = 0;
+    state.playbackControl.totalFrames = 0;
+    // 重置播放类型
+    if (payload && payload.type) {
+      // 只有在类型匹配时才重置
+      if (state.playbackControl.playbackType === payload.type) {
+        state.playbackControl.playbackType = 'none';
+      }
+    } else {
+      state.playbackControl.playbackType = 'none';
+    }
   },
 
-  PAUSE_PLAYBACK(state) {
+  PAUSE_PLAYBACK(state, payload) {
     state.playbackControl.isPlaying = false;
     state.playbackControl.isPaused = true;
+    // 保持播放类型不变
+    if (payload && payload.type) {
+      state.playbackControl.playbackType = payload.type;
+    }
   },
 
   SET_PLAYBACK_SPEED(state, speed) {
@@ -144,16 +164,51 @@ const actions = {
     commit('SELECT_GRID_VIEWPORT', viewportIndex);
   },
 
-  startPlayback({ commit }) {
-    commit('START_PLAYBACK');
+  /**
+   * 开始播放
+   * @param {Object} context - Vuex context
+   * @param {Object} payload - 播放参数
+   * @param {string} payload.type - 播放类型：'regular' | 'cine'
+   */
+  startPlayback({ commit }, payload = {}) {
+    commit('START_PLAYBACK', payload);
   },
 
-  stopPlayback({ commit }) {
-    commit('STOP_PLAYBACK');
+  /**
+   * 停止播放
+   * @param {Object} context - Vuex context
+   * @param {Object} payload - 停止参数
+   * @param {string} payload.type - 播放类型：'regular' | 'cine'
+   */
+  stopPlayback({ commit }, payload = {}) {
+    commit('STOP_PLAYBACK', payload);
   },
 
-  pausePlayback({ commit }) {
-    commit('PAUSE_PLAYBACK');
+  /**
+   * 暂停播放
+   * @param {Object} context - Vuex context
+   * @param {Object} payload - 暂停参数
+   * @param {string} payload.type - 播放类型：'regular' | 'cine'
+   */
+  pausePlayback({ commit }, payload = {}) {
+    commit('PAUSE_PLAYBACK', payload);
+  },
+
+  /**
+   * 清理播放资源
+   */
+  cleanupPlayback({ commit, state }) {
+    // 重置所有播放状态
+    commit('STOP_PLAYBACK', { type: state.playbackControl.playbackType });
+    commit('SET_PLAYBACK_CONTROL', {
+      isPlaying: false,
+      isPaused: false,
+      speed: 10,
+      currentFrame: 0,
+      totalFrames: 0,
+      direction: 'forward',
+      playbackType: 'none'
+    });
   },
 
   setPlaybackSpeed({ commit }, speed) {
@@ -201,7 +256,8 @@ const getters = {
   selectedGridViewport: (state) => state.gridViewState.viewports[state.gridViewState.selectedViewportIndex] || null,
   isPlaying: (state) => state.playbackControl.isPlaying,
   isPaused: (state) => state.playbackControl.isPaused,
-  playbackSpeed: (state) => state.playbackControl.speed
+  playbackSpeed: (state) => state.playbackControl.speed,
+  playbackType: (state) => state.playbackControl.playbackType
 };
 
 export default {

@@ -104,9 +104,9 @@ export class GridViewService {
       // 启用Cornerstone
       cornerstone.enable(viewportElement);
 
-      // 加载图像
-      await cornerstone.loadImage(imageId);
-      cornerstone.displayImage(viewportElement, await cornerstone.loadImage(imageId));
+      // 加载图像（修复重复加载问题）
+      const image = await cornerstone.loadImage(imageId);
+      cornerstone.displayImage(viewportElement, image);
 
       // 更新视口状态
       viewport.imageId = imageId;
@@ -188,7 +188,7 @@ export class GridViewService {
       try {
         cornerstone.disable(viewport);
       } catch (error) {
-        console.warn('禁用视口失败:', error);
+        // 禁用视口失败，静默处理
       }
       viewport.remove();
     });

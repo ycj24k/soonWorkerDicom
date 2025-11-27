@@ -9,8 +9,9 @@
 # Linux: /home/username/Documents/DICOM  
 # Mac: /Users/username/Documents/DICOM
 # 相对路径: ./DICOM 或 DICOM
-
-DICOM_PATH=./DICOM/张三
+# ./DICOM/PAT00001
+# ./DICOM/张三
+DICOM_PATH=./DICOM/PAT00001
 
 # 备用路径（如果主路径不存在，将尝试这些路径）
 # 用分号分隔多个路径

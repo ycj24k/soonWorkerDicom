@@ -1,27 +1,34 @@
 <template>
   <div class="grid-layout-selector" v-show="show">
-    <div class="grid-preview">
-      <div class="grid-title">选择网格布局</div>
-      <div class="single-grid-container">
+    <div class="grid-content">
+      <div class="grid-title">影像排列</div>
+      
+      <div class="grid-matrix" @mouseleave="handleMouseLeave">
         <div 
-          class="single-grid"
-          @mouseenter="showHoverGrid = true"
-          @mouseleave="showHoverGrid = false"
-          @click="selectCurrentLayout"
+          class="grid-row" 
+          v-for="row in maxRows" 
+          :key="row"
         >
           <div 
-            v-for="n in 9" 
-            :key="n"
-            class="grid-cell"
+            class="grid-cell" 
+            v-for="col in maxCols" 
+            :key="col"
             :class="{ 
-              'active': currentLayout >= n,
-              'hover': showHoverGrid && hoverLayout >= n
+              'highlight': isHighlighted(row, col),
+              'selected': isSelected(row, col)
             }"
+            @mouseenter="handleMouseEnter(row, col)"
+            @click="handleSelect(row, col)"
           ></div>
         </div>
       </div>
+      
+      <div class="grid-info">
+        {{ currentRows }} x {{ currentCols }} 网格
+      </div>
+      
       <div class="grid-actions">
-        <el-button @click="applyLayout" type="primary" size="small">应用</el-button>
+        <el-button @click="confirmLayout" type="primary" size="small" :disabled="currentRows === 0">确定</el-button>
         <el-button @click="cancel" size="small">取消</el-button>
       </div>
     </div>
@@ -39,66 +46,80 @@ export default {
   },
   data() {
     return {
-      currentLayout: 1, // 当前选择的布局（1-9个格子）
-      hoverLayout: 1, // 鼠标悬浮时显示的布局
-      showHoverGrid: false,
-      gridLayouts: [
-        { rows: 1, cols: 1, totalSlots: 1 },
-        { rows: 1, cols: 2, totalSlots: 2 },
-        { rows: 2, cols: 2, totalSlots: 4 },
-        { rows: 2, cols: 3, totalSlots: 6 },
-        { rows: 3, cols: 3, totalSlots: 9 }
-      ]
+      maxRows: 4, // 最大行数
+      maxCols: 4, // 最大列数
+      hoverRow: 0,
+      hoverCol: 0,
+      selectedRow: 0,
+      selectedCol: 0
     };
   },
-  mounted() {
-    // 监听鼠标移动来更新hoverLayout
-    this.$el.addEventListener('mousemove', this.handleMouseMove);
-  },
-  beforeDestroy() {
-    if (this.$el) {
-      this.$el.removeEventListener('mousemove', this.handleMouseMove);
+  computed: {
+    currentRows() {
+      return this.hoverRow > 0 ? this.hoverRow : this.selectedRow;
+    },
+    currentCols() {
+      return this.hoverCol > 0 ? this.hoverCol : this.selectedCol;
     }
   },
   methods: {
-    handleMouseMove(event) {
-      if (!this.showHoverGrid) return;
-      
-      const rect = this.$el.querySelector('.single-grid').getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      
-      // 计算鼠标在哪个格子位置
-      const cellWidth = rect.width / 3;
-      const cellHeight = rect.height / 3;
-      const col = Math.floor(x / cellWidth);
-      const row = Math.floor(y / cellHeight);
-      
-      // 计算应该激活的格子数量
-      if (row === 0 && col === 0) {
-        this.hoverLayout = 1; // 1x1
-      } else if (row === 0 && col <= 1) {
-        this.hoverLayout = 2; // 1x2
-      } else if (row <= 1 && col <= 1) {
-        this.hoverLayout = 4; // 2x2
-      } else if (row <= 1 && col <= 2) {
-        this.hoverLayout = 6; // 2x3
-      } else {
-        this.hoverLayout = 9; // 3x3
+    handleMouseEnter(row, col) {
+      this.hoverRow = row;
+      this.hoverCol = col;
+    },
+    handleMouseLeave() {
+      this.hoverRow = 0;
+      this.hoverCol = 0;
+    },
+    isHighlighted(row, col) {
+      // 鼠标悬浮时的高亮逻辑：小于等于悬浮位置的格子
+      if (this.hoverRow > 0 && this.hoverCol > 0) {
+        return row <= this.hoverRow && col <= this.hoverCol;
       }
+      return false;
     },
-    selectCurrentLayout() {
-      this.currentLayout = this.hoverLayout;
+    isSelected(row, col) {
+      // 选中状态的逻辑（当鼠标未悬浮时显示）
+      if (this.hoverRow === 0 && this.selectedRow > 0) {
+        return row <= this.selectedRow && col <= this.selectedCol;
+      }
+      return false;
     },
-    applyLayout() {
-      // 根据currentLayout找到对应的布局配置
-      const layoutIndex = this.gridLayouts.findIndex(layout => layout.totalSlots === this.currentLayout);
-      const layout = this.gridLayouts[layoutIndex] || this.gridLayouts[2]; // 默认2x2
+    handleSelect(row, col) {
+      this.selectedRow = row;
+      this.selectedCol = col;
+      // 也可以选择后直接应用，或者要求点击确定
+      // 这里我们只更新选中状态，用户需点击确定
+    },
+    confirmLayout() {
+      const rows = this.selectedRow || 1; // 默认至少1x1
+      const cols = this.selectedCol || 1;
+      
+      const layout = {
+        rows,
+        cols,
+        totalSlots: rows * cols
+      };
+      
       this.$emit('apply-layout', layout);
-      this.$emit('close');
+      this.reset();
     },
     cancel() {
       this.$emit('close');
+      this.reset();
+    },
+    reset() {
+      this.hoverRow = 0;
+      this.hoverCol = 0;
+      // selectedRow/Col 可以保留或重置，视需求而定，这里选择保留上次的选择方便调整
+    }
+  },
+  watch: {
+    show(val) {
+      if (val) {
+        // 每次显示时，如果不希望保留上次选择，可以在这里重置
+        // this.reset();
+      }
     }
   }
 };
@@ -108,68 +129,82 @@ export default {
 .grid-layout-selector {
   position: absolute;
   top: 60px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.9);
-  border: 2px solid #00C325;
-  border-radius: 8px;
+  left: 60px; /* 调整位置以对齐工具栏按钮 */
+  background: rgba(30, 30, 30, 0.95);
+  border: 1px solid #444;
+  border-radius: 4px;
   padding: 15px;
-  z-index: 1000;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  min-width: 200px;
 }
 
-.grid-preview {
+.grid-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
   .grid-title {
     color: #fff;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: bold;
-    text-align: center;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
+    width: 100%;
+    text-align: left;
+    border-bottom: 1px solid #555;
+    padding-bottom: 8px;
   }
 
-  .single-grid-container {
+  .grid-matrix {
     display: flex;
-    justify-content: center;
-    margin-bottom: 20px;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+    padding: 4px;
+    border: 1px solid transparent; /* 占位防止抖动 */
   }
 
-  .single-grid {
-    width: 120px;
-    height: 120px;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: 1fr 1fr 1fr;
-    gap: 2px;
-    border: 2px solid #666;
-    padding: 4px;
-    background-color: #222;
-    cursor: pointer;
-    transition: border-color 0.2s ease;
-
-    &:hover {
-      border-color: #00C325;
-    }
+  .grid-row {
+    display: flex;
+    gap: 4px;
   }
 
   .grid-cell {
-    background-color: #444;
+    width: 30px;
+    height: 30px;
+    background-color: #333;
     border: 1px solid #555;
-    transition: all 0.2s ease;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    border-radius: 2px;
 
-    &.active {
-      background-color: #00C325;
+    &:hover {
+      border-color: #888;
+    }
+
+    &.highlight {
+      background-color: rgba(0, 195, 37, 0.6); /* 主题绿色半透明 */
       border-color: #00C325;
     }
 
-    &.hover {
-      background-color: rgba(0, 195, 37, 0.6);
-      border-color: rgba(0, 195, 37, 0.6);
+    &.selected {
+      background-color: rgba(0, 195, 37, 0.3);
+      border-color: #00C325;
     }
+  }
+
+  .grid-info {
+    color: #ccc;
+    font-size: 13px;
+    margin-bottom: 15px;
+    font-family: monospace;
   }
 
   .grid-actions {
     display: flex;
     gap: 10px;
-    justify-content: center;
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 </style>

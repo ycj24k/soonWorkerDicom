@@ -22,31 +22,58 @@ class CinePlaybackService {
     this.cineInfo = null;
     this.imageId = null;
     this.element = null;
+    this.loadedImages = new Map(); // 已加载的图像缓存
+    this.frameLoadTimeout = 5000; // 帧加载超时时间（毫秒）
+    this.maxRetries = 3; // 最大重试次数
   }
 
   /**
    * 开始播放动态影像
+   * @param {HTMLElement} element - Cornerstone元素
+   * @param {string} imageId - 图像ID
+   * @param {Object} cineInfo - 动态影像信息
+   * @param {number} cineInfo.frameCount - 帧数
+   * @param {number} cineInfo.frameTime - 帧时间（毫秒）
+   * @param {string} cineInfo.type - 动态影像类型
+   * @param {Object} options - 播放选项
+   * @param {number} options.speed - 播放速度（FPS）
+   * @param {string} options.direction - 播放方向（forward/backward）
    */
   startCinePlayback(element, imageId, cineInfo, options = {}) {
+    // 验证参数
+    if (!element || !imageId || !cineInfo) {
+      throw new Error('动态影像播放参数不完整');
+    }
+
+    if (!cineInfo.frameCount || cineInfo.frameCount < 1) {
+      throw new Error('动态影像帧数无效');
+    }
+
+    // 停止之前的播放
     if (this.playbackTimer) {
       this.stopCinePlayback();
     }
+
+    // 清理之前的资源
+    this.cleanupImages();
 
     this.element = element;
     this.imageId = imageId;
     this.cineInfo = cineInfo;
 
-    // 设置播放参数
+    // 验证并设置播放参数
+    const totalFrames = Math.max(1, parseInt(cineInfo.frameCount));
+    const startFrame = Math.max(0, Math.min(totalFrames - 1, options.startFrame || 0));
+
     this.playbackControl = {
       isPlaying: true,
       isPaused: false,
-      currentFrame: 0,
-      totalFrames: cineInfo.frameCount || 1,
-      speed: options.speed || this.calculateOptimalSpeed(cineInfo),
-      direction: options.direction || 'forward',
+      currentFrame: startFrame,
+      totalFrames: totalFrames,
+      speed: Math.max(1, Math.min(30, options.speed || this.calculateOptimalSpeed(cineInfo))),
+      direction: options.direction === 'backward' ? 'backward' : 'forward',
       frameTime: cineInfo.frameTime || 50
     };
-
 
     // 加载第一帧
     this.loadCurrentFrame();
@@ -85,16 +112,25 @@ class CinePlaybackService {
     const totalFrames = this.playbackControl.totalFrames;
     const direction = this.playbackControl.direction;
 
+    // 验证帧索引
+    if (currentFrame < 0 || currentFrame >= totalFrames) {
+      console.error(`帧索引超出范围: ${currentFrame}/${totalFrames}`);
+      this.stopCinePlayback();
+      return;
+    }
 
     // 加载当前帧
     this.loadCurrentFrame();
 
     // 更新帧索引
+    let nextFrame;
     if (direction === 'forward') {
-      this.playbackControl.currentFrame = (currentFrame + 1) % totalFrames;
+      nextFrame = (currentFrame + 1) % totalFrames;
     } else {
-      this.playbackControl.currentFrame = currentFrame === 0 ? totalFrames - 1 : currentFrame - 1;
+      nextFrame = currentFrame === 0 ? totalFrames - 1 : currentFrame - 1;
     }
+
+    this.playbackControl.currentFrame = nextFrame;
 
     // 设置下一帧的定时器
     const interval = 1000 / this.playbackControl.speed;
@@ -104,28 +140,76 @@ class CinePlaybackService {
   }
 
   /**
-   * 加载当前帧
+   * 加载当前帧（带重试机制和超时处理）
    */
   async loadCurrentFrame() {
-    try {
-      if (!this.element || !this.imageId) {
-        console.error('动态影像播放元素或图像ID为空');
-        return;
-      }
+    const frameIndex = this.playbackControl.currentFrame;
+    const totalFrames = this.playbackControl.totalFrames;
 
-      // 构建当前帧的图像ID
-      const frameImageId = `${this.imageId}?frame=${this.playbackControl.currentFrame}`;
-      
-      
-      // 加载图像
-      const image = await cornerstone.loadImage(frameImageId);
-      
-      // 显示图像
-      cornerstone.displayImage(this.element, image);
-      
-      
-    } catch (error) {
-      console.error('加载动态影像帧失败:', error);
+    // 验证帧索引
+    if (frameIndex < 0 || frameIndex >= totalFrames) {
+      console.error(`帧索引超出范围: ${frameIndex}/${totalFrames}`);
+      return;
+    }
+
+    if (!this.element || !this.imageId) {
+      console.error('动态影像播放元素或图像ID为空');
+      return;
+    }
+
+    // 构建当前帧的图像ID
+    const frameImageId = `${this.imageId}?frame=${frameIndex}`;
+
+    // 检查缓存
+    if (this.loadedImages.has(frameImageId)) {
+      const cachedImage = this.loadedImages.get(frameImageId);
+      try {
+        cornerstone.displayImage(this.element, cachedImage);
+        return;
+      } catch (error) {
+        // 缓存失效，重新加载
+        this.loadedImages.delete(frameImageId);
+      }
+    }
+
+    // 加载图像（带重试和超时）
+    let lastError = null;
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        // 创建超时Promise
+        const loadPromise = cornerstone.loadImage(frameImageId);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('帧加载超时')), this.frameLoadTimeout);
+        });
+
+        // 使用Promise.race实现超时控制
+        const image = await Promise.race([loadPromise, timeoutPromise]);
+
+        // 显示图像
+        cornerstone.displayImage(this.element, image);
+
+        // 缓存图像（限制缓存大小）
+        this.loadedImages.set(frameImageId, image);
+        if (this.loadedImages.size > 50) {
+          // 移除最旧的缓存
+          const firstKey = this.loadedImages.keys().next().value;
+          this.loadedImages.delete(firstKey);
+        }
+
+        return; // 成功加载，退出重试循环
+
+      } catch (error) {
+        lastError = error;
+
+        // 最后一次尝试失败
+        if (attempt === this.maxRetries - 1) {
+          console.error(`加载动态影像帧失败 (帧 ${frameIndex}/${totalFrames - 1}):`, error);
+          // 不停止播放，继续下一帧
+        } else {
+          // 等待后重试
+          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+        }
+      }
     }
   }
 
@@ -171,13 +255,34 @@ class CinePlaybackService {
   }
 
   /**
-   * 跳转到指定帧
+   * 跳转到指定帧（带验证）
+   * @param {number} frameIndex - 目标帧索引
+   * @returns {boolean} 是否成功跳转
    */
   goToFrame(frameIndex) {
-    if (frameIndex >= 0 && frameIndex < this.playbackControl.totalFrames) {
-      this.playbackControl.currentFrame = frameIndex;
-      this.loadCurrentFrame();
+    const totalFrames = this.playbackControl.totalFrames;
+    
+    // 验证帧索引
+    if (frameIndex < 0 || frameIndex >= totalFrames) {
+      console.error(`跳转帧索引超出范围: ${frameIndex}/${totalFrames}`);
+      return false;
     }
+
+    // 如果正在播放，暂停以便跳转
+    const wasPlaying = this.playbackControl.isPlaying;
+    if (wasPlaying) {
+      this.pauseCinePlayback();
+    }
+
+    this.playbackControl.currentFrame = frameIndex;
+    this.loadCurrentFrame();
+
+    // 如果之前正在播放，恢复播放
+    if (wasPlaying) {
+      this.resumeCinePlayback();
+    }
+
+    return true;
   }
 
   /**
@@ -210,13 +315,63 @@ class CinePlaybackService {
   }
 
   /**
-   * 清理资源
+   * 同步播放状态（供外部调用以同步状态）
+   * @returns {Object} 当前播放状态
+   */
+  syncState() {
+    return {
+      isPlaying: this.playbackControl.isPlaying,
+      isPaused: this.playbackControl.isPaused,
+      currentFrame: this.playbackControl.currentFrame,
+      totalFrames: this.playbackControl.totalFrames,
+      speed: this.playbackControl.speed,
+      direction: this.playbackControl.direction,
+      type: 'cine'
+    };
+  }
+
+  /**
+   * 清理已加载的图像缓存
+   */
+  cleanupImages() {
+    if (this.element && this.loadedImages.size > 0) {
+      // 释放Cornerstone中的图像缓存
+      this.loadedImages.forEach((image, imageId) => {
+        try {
+          cornerstone.removeImage(imageId);
+        } catch (error) {
+          // 忽略清理错误
+        }
+      });
+    }
+    this.loadedImages.clear();
+  }
+
+  /**
+   * 清理资源（完整清理）
    */
   cleanup() {
+    // 停止播放
     this.stopCinePlayback();
+    
+    // 清理图像缓存
+    this.cleanupImages();
+    
+    // 清理引用
     this.element = null;
     this.imageId = null;
     this.cineInfo = null;
+    
+    // 重置播放控制
+    this.playbackControl = {
+      isPlaying: false,
+      isPaused: false,
+      currentFrame: 0,
+      totalFrames: 0,
+      speed: 10,
+      direction: 'forward',
+      frameTime: 50
+    };
   }
 }
 

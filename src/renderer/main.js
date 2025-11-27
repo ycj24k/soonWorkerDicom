@@ -42,15 +42,12 @@ Vue.use(ElementUI, {
 })
 
 try {
-  console.log('开始配置Cornerstone...');
-  
   // 设置外部依赖
   cornerstoneWadoImageLoader.external.cornerstone = cornerstone;
   cornerstoneWadoImageLoader.external.dicomParser = dicomParser;
   cornerstoneTools.external.cornerstone = cornerstone;
   cornerstoneTools.external.Hammer = Hammer;
   cornerstoneTools.external.cornerstoneMath = cornerstoneMath;
-  console.log('外部依赖设置完成');
 
   // 配置DICOM文件加载器
   cornerstoneWadoImageLoader.configure({
@@ -61,17 +58,16 @@ try {
     beforeSend: function(xhr) {
       // 允许跨域请求
       xhr.setRequestHeader('Access-Control-Allow-Origin', '*');
+      // XA/US Cine 多帧 DICOM 必须设置此 Accept 头
+      // 否则服务器可能不返回 multi-frame 正确序列
+      xhr.setRequestHeader('Accept', 'multipart/related; type="application/dicom"');
     }
   });
-  console.log('DICOM文件加载器配置完成');
 
   // 注册wadouri加载器
-  console.log('开始注册wadouri image loader...');
   cornerstone.registerImageLoader('wadouri', cornerstoneWadoImageLoader.wadouri.loadImage);
-  console.log('wadouri image loader注册完成');
 
   // 初始化web worker管理器
-  console.log('开始初始化web worker管理器...');
   cornerstoneWadoImageLoader.webWorkerManager.initialize({
     maxWebWorkers: navigator.hardwareConcurrency || 1,
     startWebWorkersOnDemand: true,
@@ -82,15 +78,27 @@ try {
       }
     }
   });
-  console.log('web worker管理器初始化完成');
 
-  console.log('Cornerstone image loader配置完成');
 } catch (error) {
   console.error('Cornerstone配置失败:', error);
 }
 
 // 启用所有内置工具
 cornerstoneTools.init();
+
+// 全局标志：确保 StackScrollMouseWheel 工具只注册一次
+let stackScrollMouseWheelToolRegistered = false;
+
+// 注册 StackScrollMouseWheel 工具（全局注册一次）
+if (!stackScrollMouseWheelToolRegistered && cornerstoneTools.StackScrollMouseWheelTool) {
+  try {
+    cornerstoneTools.addTool(cornerstoneTools.StackScrollMouseWheelTool);
+    stackScrollMouseWheelToolRegistered = true;
+  } catch (error) {
+    // 工具已注册，设置标志
+    stackScrollMouseWheelToolRegistered = true;
+  }
+}
 
 // 设置公共方法
 Vue.prototype.$cornerstone = cornerstone

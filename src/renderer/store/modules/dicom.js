@@ -32,7 +32,14 @@ const state = {
   // 动态影像详细信息
   cineInfo: null,
   // 当前动态影像文件路径
-  currentCineImagePath: null
+  currentCineImagePath: null,
+  // 系列后台加载进度（用于底部进度条和系列数量展示）
+  seriesProgress: {
+    isActive: false,
+    currentSeriesIndex: -1,
+    currentLoaded: 0,
+    currentTotal: 0
+  }
 };
 
 const mutations = {
@@ -58,6 +65,24 @@ const mutations = {
 
   SET_CURRENT_CINE_IMAGE_PATH(state, path) {
     state.currentCineImagePath = path;
+  },
+
+  SET_SERIES_PROGRESS_STATE(state, payload) {
+    state.seriesProgress.isActive = payload.isActive;
+    state.seriesProgress.currentSeriesIndex = payload.currentSeriesIndex;
+    state.seriesProgress.currentLoaded = payload.currentLoaded;
+    state.seriesProgress.currentTotal = payload.currentTotal;
+  },
+
+  SET_SERIES_PROGRESS_LOADED(state, loaded) {
+    state.seriesProgress.currentLoaded = loaded;
+  },
+
+  RESET_SERIES_PROGRESS(state) {
+    state.seriesProgress.isActive = false;
+    state.seriesProgress.currentSeriesIndex = -1;
+    state.seriesProgress.currentLoaded = 0;
+    state.seriesProgress.currentTotal = 0;
   },
 
   SET_CURRENT_DIRECTORY(state, directory) {
@@ -86,7 +111,7 @@ const mutations = {
   },
 
   SET_ACTIVE_IMAGE(state, index) {
-    state.activeImageIndex = index;
+    state.activeImageIndex = index !== undefined && index !== null ? index : 0;
   },
 
   SET_CURRENT_IMAGE_IDS(state, imageIds) {
@@ -109,6 +134,12 @@ const mutations = {
     state.isDynamicSeries = false;
     state.cineInfo = null;
     state.currentCineImagePath = null;
+    state.seriesProgress = {
+      isActive: false,
+      currentSeriesIndex: -1,
+      currentLoaded: 0,
+      currentTotal: 0
+    };
   }
 };
 
@@ -147,7 +178,6 @@ const actions = {
         commit('SET_IS_DYNAMIC_SERIES', true);
         commit('SET_CINE_INFO', dynamicResult.cineInfo);
         commit('SET_CURRENT_CINE_IMAGE_PATH', dynamicResult.imagePath);
-        console.log('🎬 Vuex: 动态影像信息已保存');
       } else {
         commit('SET_IS_DYNAMIC_SERIES', false);
         commit('SET_CINE_INFO', null);
@@ -164,15 +194,15 @@ const actions = {
         }];
       }
 
-      // 直接使用结构分析结果设置系列数据
-      commit('SET_DICOM_SERIES', structureAnalysis.seriesNodes);
-      
-      // 生成缩略图
-      const { thumbnails, dicomDict } = await dicomService.generateThumbnailList(structureAnalysis.seriesNodes);
+      // 生成缩略图并过滤无效系列（只有成功生成缩略图的系列才是有效的）
+      const { thumbnails, dicomDict, filteredSeries } = await dicomService.generateThumbnailList(structureAnalysis.seriesNodes);
+
+      // 使用过滤后的系列列表（只包含有效影像的系列）
+      commit('SET_DICOM_SERIES', filteredSeries || []);
       commit('SET_THUMBNAILS', thumbnails);
       commit('SET_DICOM_DICT', dicomDict);
 
-      // 构建目录树
+      // 构建目录树（基于当前目录结构和最新的DICOM字典）
       const treeData = await dicomService.buildTree([directoryTree]);
       commit('SET_DIRECTORY_TREE', treeData);
       errorHandler.handleSuccess(`DICOM目录加载完成: ${directory}`);
@@ -186,10 +216,49 @@ const actions = {
   },
 
   /**
+   * 按系列顺序后台加载（仅用于进度反馈，不重复实际图像解码）
+   */
+  async startBackgroundSeriesLoading({ state, commit }) {
+    const seriesList = state.dicomSeries || [];
+    if (!Array.isArray(seriesList) || seriesList.length === 0) {
+      commit('RESET_SERIES_PROGRESS');
+      return;
+    }
+
+    // 串行遍历每个系列，按图像数量更新进度
+    for (let i = 0; i < seriesList.length; i++) {
+      const series = seriesList[i];
+      const children = series && Array.isArray(series.children) ? series.children : [];
+      const total = children.length;
+
+      if (total === 0) {
+        continue;
+      }
+
+      commit('SET_SERIES_PROGRESS_STATE', {
+        isActive: true,
+        currentSeriesIndex: i,
+        currentLoaded: 0,
+        currentTotal: total
+      });
+
+      for (let j = 0; j < total; j++) {
+        // 这里不进行真正的图像解码，仅作为“按文件数遍历”的后台加载进度反馈
+        commit('SET_SERIES_PROGRESS_LOADED', j + 1);
+        // 让出事件循环，避免阻塞UI
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    // 所有系列完成后隐藏进度条
+    commit('RESET_SERIES_PROGRESS');
+  },
+
+  /**
    * 加载单个DICOM文件
    */
   async loadDicomFile({ commit }, filePath) {
-    console.log('📁 Vuex: 开始加载单个DICOM文件:', filePath);
     // 不再自动设置loading状态，由组件控制
     commit('SET_ERROR', null);
     
@@ -202,8 +271,6 @@ const actions = {
       const path = require('path');
       const normalizedFilePath = path.normalize(filePath);
       const fileName = path.basename(normalizedFilePath);
-      console.log('📄 Vuex: 文件名:', fileName);
-      console.log('📄 Vuex: 标准化路径:', normalizedFilePath);
       
       const directoryTree = {
         name: fileName,
@@ -215,16 +282,12 @@ const actions = {
           children: []
         }]
       };
-      console.log('🌳 Vuex: 创建的单文件树结构:', directoryTree);
 
       // 智能分析DICOM结构
-      console.log('🔍 Vuex: 开始分析单文件DICOM结构...');
       const structureAnalysis = dicomService.analyzeDicomStructure(directoryTree);
       if (!structureAnalysis) {
-        console.error('❌ Vuex: DICOM文件格式无效');
         throw new Error('DICOM文件格式无效');
       }
-      console.log('✅ Vuex: DICOM结构分析成功:', structureAnalysis);
 
       // 检测是否为动态影像
       const dynamicResult = dicomService.isDynamicImageSeries(structureAnalysis.seriesNodes);
@@ -233,7 +296,6 @@ const actions = {
         commit('SET_IS_DYNAMIC_SERIES', true);
         commit('SET_CINE_INFO', dynamicResult.cineInfo);
         commit('SET_CURRENT_CINE_IMAGE_PATH', dynamicResult.imagePath);
-        console.log('🎬 Vuex: 动态影像信息已保存');
       } else {
         commit('SET_IS_DYNAMIC_SERIES', false);
         commit('SET_CINE_INFO', null);
@@ -252,10 +314,11 @@ const actions = {
         }]
       };
 
-      commit('SET_DICOM_SERIES', [singleSeries]);
-
-      // 生成缩略图
-      const { thumbnails, dicomDict } = await dicomService.generateThumbnailList([singleSeries]);
+      // 生成缩略图并过滤无效系列
+      const { thumbnails, dicomDict, filteredSeries } = await dicomService.generateThumbnailList([singleSeries]);
+      
+      // 使用过滤后的系列列表
+      commit('SET_DICOM_SERIES', filteredSeries || []);
       commit('SET_THUMBNAILS', thumbnails);
       commit('SET_DICOM_DICT', dicomDict);
 
@@ -379,6 +442,11 @@ const getters = {
       return element ? element.value : '';
     }
     return '';
+  },
+  
+  // 获取当前图像索引（用于响应式更新）
+  activeImageIndex: (state) => {
+    return state.activeImageIndex || 0;
   }
 };
 
