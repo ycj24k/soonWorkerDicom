@@ -92,11 +92,12 @@ export class DicomThumbnailService {
   }
 
   /**
-   * 生成缩略图列表
+   * 生成缩略图列表（快速模式 - 只解析关键标签）
    * @param {Array<Object>} seriesList - 系列节点数组
+   * @param {boolean} fullParse - 是否完整解析所有标签（默认false，只解析关键标签）
    * @returns {Object} 包含thumbnails、dicomDict和filteredSeries的对象
    */
-  async generateThumbnailList(seriesList) {
+  async generateThumbnailList(seriesList, fullParse = false) {
     const thumbnails = [];
     const dicomDict = [];
     const filteredSeries = []; // 过滤后的系列列表，只包含成功生成缩略图的系列
@@ -140,7 +141,112 @@ export class DicomThumbnailService {
         const byteArray = new Uint8Array(arrayBuffer);
         const dataSet = dicomParser.parseDicom(byteArray);
         
-        // 提取所有DICOM标签
+        // 根据模式选择解析策略
+        let seriesDict = [];
+        if (fullParse) {
+          // 完整解析所有标签（后台加载阶段）
+          seriesDict = this.parseAllDicomTags(dataSet);
+        } else {
+          // 快速解析关键标签（首次加载阶段）
+          seriesDict = this.parseKeyDicomTags(dataSet);
+        }
+        
+        // 生成缩略图 - 只有成功生成有效缩略图才算有效系列
+        const thumbnail = await this.generateThumbnail(firstImage);
+        // 验证缩略图是否有效（长度足够表示真实图像数据）
+        if (!thumbnail || thumbnail.length < 5000) {
+          // 缩略图无效（null 或数据太小），跳过该系列
+          continue;
+        }
+        
+        // 成功生成缩略图，添加到结果列表
+        thumbnails.push({
+          modality: dataSet.string("x00080060") || "Unknown",
+          seriesNo: dataSet.string("x00200011") || "0",
+          seriesDate: dataSet.string("x00080021") || "",
+          seriesTime: dataSet.string("x00080031") || "",
+          description: dataSet.string("x0008103e") || series.name,
+          seriesUID: dataSet.string("x0020000e") || "",
+          image: thumbnail,
+          path: firstImage.path
+        });
+        dicomDict.push(seriesDict);
+        filteredSeries.push(series); // 添加到过滤后的系列列表
+      } catch (error) {
+        // 解析失败或生成缩略图失败，跳过该系列（无效影像）
+      }
+    }
+    
+    return { thumbnails, dicomDict, filteredSeries };
+  }
+
+  /**
+   * 快速解析关键DICOM标签（用于首次加载）
+   * @param {Object} dataSet - DICOM数据集
+   * @returns {Array} 关键标签数组
+   */
+  parseKeyDicomTags(dataSet) {
+    // 只解析显示所需的关键标签
+    const keyTags = [
+      'x00080060', // Modality
+      'x00200011', // Series Number
+      'x00080021', // Series Date
+      'x00080031', // Series Time
+      'x0008103e', // Series Description
+      'x0020000e', // Series Instance UID
+      'x00100010', // Patient Name
+      'x00100020', // Patient ID
+      'x00080020', // Study Date
+      'x0020000d', // Study Instance UID
+      'x00280010', // Rows
+      'x00280011', // Columns
+      'x00280008'  // Number of Frames
+    ];
+
+    const seriesDict = [];
+    for (const tag of keyTags) {
+      try {
+        const group = tag.slice(1, 5);
+        const element = tag.slice(5);
+        const tagStr = `(${group},${element})`;
+        const dict = dcmjs.data.DicomMetaDictionary.dictionary[tagStr];
+        const description = dict && dict.name ? dict.name : 'Unknown Item';
+        
+        const elementData = dataSet.elements[tag];
+        if (elementData) {
+          let value = '';
+          const stringValue = dataSet.string(tag);
+          if (stringValue) {
+            value = stringValue.length > 200 ? stringValue.slice(0, 200) + '...' : stringValue;
+          } else {
+            try {
+              value = dataSet.floatString(tag) || dataSet.intString(tag) || `[${elementData.vr}]`;
+            } catch {
+              value = `[${elementData.vr}]`;
+            }
+          }
+          
+          seriesDict.push({
+            tag: tag.slice(1),
+            description,
+            value
+          });
+        }
+      } catch (e) {
+        // 跳过单个标签错误
+      }
+    }
+    
+    seriesDict.sort((a, b) => a.tag.localeCompare(b.tag));
+    return seriesDict;
+  }
+
+  /**
+   * 完整解析所有DICOM标签（用于后台加载）
+   * @param {Object} dataSet - DICOM数据集
+   * @returns {Array} 完整标签数组
+   */
+  parseAllDicomTags(dataSet) {
         const seriesDict = [];
         for (const tag of Object.keys(dataSet.elements || {})) {
           try {
@@ -182,34 +288,7 @@ export class DicomThumbnailService {
         }
         
         seriesDict.sort((a, b) => a.tag.localeCompare(b.tag));
-        
-        // 生成缩略图 - 只有成功生成有效缩略图才算有效系列
-        const thumbnail = await this.generateThumbnail(firstImage);
-        // 验证缩略图是否有效（长度足够表示真实图像数据）
-        if (!thumbnail || thumbnail.length < 5000) {
-          // 缩略图无效（null 或数据太小），跳过该系列
-          continue;
-        }
-        
-        // 成功生成缩略图，添加到结果列表
-        thumbnails.push({
-          modality: dataSet.string("x00080060") || "Unknown",
-          seriesNo: dataSet.string("x00200011") || "0",
-          seriesDate: dataSet.string("x00080021") || "",
-          seriesTime: dataSet.string("x00080031") || "",
-          description: dataSet.string("x0008103e") || series.name,
-          seriesUID: dataSet.string("x0020000e") || "",
-          image: thumbnail,
-          path: firstImage.path
-        });
-        dicomDict.push(seriesDict);
-        filteredSeries.push(series); // 添加到过滤后的系列列表
-      } catch (error) {
-        // 解析失败或生成缩略图失败，跳过该系列（无效影像）
-      }
-    }
-    
-    return { thumbnails, dicomDict, filteredSeries };
+    return seriesDict;
   }
 }
 

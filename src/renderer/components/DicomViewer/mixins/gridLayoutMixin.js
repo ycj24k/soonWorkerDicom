@@ -145,6 +145,9 @@ export default {
       if (this._gridClickHandler) {
         container.removeEventListener('mousedown', this._gridClickHandler, true);
       }
+      if (this._gridWheelHandler) {
+        container.removeEventListener('wheel', this._gridWheelHandler, true);
+      }
       
       // 创建新的事件处理器
       this._gridClickHandler = (e) => {
@@ -169,6 +172,190 @@ export default {
       
       // 添加事件监听器（使用捕获阶段，确保在 canvas 事件之前）
       container.addEventListener('mousedown', this._gridClickHandler, true);
+
+      // 绑定鼠标滚轮事件：直接根据 stack 手动切换图像，绕过工具可能的兼容性问题
+      this._gridWheelHandler = (e) => {
+        try {
+          let target = e.target;
+          let viewport = null;
+
+          // 向上查找，直到找到 .grid-viewport 或到达容器
+          while (target && target !== container) {
+            if (target.classList && target.classList.contains('grid-viewport')) {
+              viewport = target;
+              break;
+            }
+            target = target.parentElement;
+          }
+
+          if (!viewport) {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] 未找到视口，忽略滚轮事件');
+            return;
+          }
+
+          // 阻止默认滚动，避免整个页面滚动
+          if (e.cancelable) {
+            e.preventDefault();
+          }
+
+          const tools = this.$cornerstoneTools;
+          const cornerstone = this.$cornerstone;
+          if (!tools || !cornerstone) {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] Cornerstone 工具或核心未初始化');
+            return;
+          }
+
+          const stackState = tools.getToolState(viewport, 'stack');
+          if (!stackState || !stackState.data || stackState.data.length === 0) {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] 视口没有 stack state');
+            return;
+          }
+
+          const stack = stackState.data[0];
+          let imageIds = Array.isArray(stack.imageIds) ? stack.imageIds : [];
+          let currentIndex = typeof stack.currentImageIdIndex === 'number'
+            ? stack.currentImageIdIndex
+            : 0;
+
+          // 关键修复：如果 stack 的 imageIds 数量少于 series.children 的数量，自动更新 stack
+          const seriesIndex = parseInt(viewport.dataset.seriesIndex, 10);
+          if (!isNaN(seriesIndex)) {
+            const dicomSeries = this.$store.state.dicom.dicomSeries;
+            const currentSeries = dicomSeries && dicomSeries[seriesIndex];
+            if (currentSeries && Array.isArray(currentSeries.children)) {
+              const childrenLength = currentSeries.children.length;
+              if (childrenLength > imageIds.length) {
+                // eslint-disable-next-line no-console
+                console.log('[gridLayoutMixin][wheel] 检测到 stack 不完整，自动更新', {
+                  stackImageIdsLength: imageIds.length,
+                  seriesChildrenLength: childrenLength,
+                  seriesIndex
+                });
+                // 重新构建 imageIds
+                const { buildImageId } = require('../../../utils/DicomUtils');
+                const newImageIds = currentSeries.children
+                  .map(img => buildImageId(img))
+                  .filter(id => id !== null);
+                if (newImageIds.length > imageIds.length) {
+                  const oldLength = imageIds.length;
+                  // 更新 stack
+                  stack.imageIds = newImageIds;
+                  // 确保当前索引在有效范围内
+                  if (currentIndex >= newImageIds.length) {
+                    currentIndex = newImageIds.length - 1;
+                    stack.currentImageIdIndex = currentIndex;
+                  }
+                  // 更新 tool state
+                  tools.addToolState(viewport, 'stack', stack);
+                  imageIds = newImageIds;
+                  // eslint-disable-next-line no-console
+                  console.log('[gridLayoutMixin][wheel] stack 已更新', {
+                    oldLength,
+                    newLength: newImageIds.length,
+                    currentIndex: stack.currentImageIdIndex
+                  });
+                }
+              }
+            }
+          }
+
+          // eslint-disable-next-line no-console
+          console.log('[gridLayoutMixin][wheel] 检查 stack 状态', {
+            imageIdsLength: imageIds.length,
+            currentIndex,
+            deltaY: e.deltaY
+          });
+
+          if (imageIds.length <= 1) {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] 只有一张图，无法切换', {
+              imageIdsLength: imageIds.length
+            });
+            return; // 只有一张图时滚轮无意义
+          }
+
+          const delta = e.deltaY || e.wheelDelta || 0;
+          if (!delta) {
+            return;
+          }
+
+          const step = delta > 0 ? 1 : -1;
+          let newIndex = currentIndex + step;
+          if (newIndex < 0) newIndex = 0;
+          if (newIndex >= imageIds.length) newIndex = imageIds.length - 1;
+          if (newIndex === currentIndex) {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] 索引未变化，跳过切换', {
+              currentIndex,
+              newIndex,
+              total: imageIds.length
+            });
+            return;
+          }
+
+          // 优先使用 cornerstoneTools 自带的 stack 滚动方法（更稳定）
+          if (typeof tools.stackScroll === 'function') {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] 使用 cornerstoneTools.stackScroll 切换图像', {
+              currentIndex,
+              newIndex,
+              step,
+              total: imageIds.length
+            });
+            tools.stackScroll(viewport, step);
+            return;
+          }
+
+          // 兜底方案：手动切换当前索引并加载新图像
+          const imageId = imageIds[newIndex];
+          if (!imageId) {
+            // eslint-disable-next-line no-console
+            console.log('[gridLayoutMixin][wheel] 目标 imageId 不存在', {
+              newIndex,
+              total: imageIds.length
+            });
+            return;
+          }
+
+          stack.currentImageIdIndex = newIndex;
+
+          // eslint-disable-next-line no-console
+          console.log('[gridLayoutMixin][wheel] 手动切换图像', {
+            currentIndex,
+            newIndex,
+            total: imageIds.length,
+            imageId: imageId.substring(0, 50) + '...'
+          });
+
+          cornerstone.loadImage(imageId).then(image => {
+            try {
+              cornerstone.displayImage(viewport, image);
+              // eslint-disable-next-line no-console
+              console.log('[gridLayoutMixin][wheel] 图像切换成功', {
+                newIndex,
+                total: imageIds.length
+              });
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error('[gridLayoutMixin][wheel] 显示图像失败', err);
+            }
+          }).catch((err) => {
+            // eslint-disable-next-line no-console
+            console.error('[gridLayoutMixin][wheel] 加载图像失败', err);
+          });
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error('[gridLayoutMixin][wheel] 滚轮切换异常', error);
+        }
+      };
+
+      // 使用捕获阶段 + 非被动监听器：
+      // - 捕获阶段可以在 Cornerstone 工具处理前先拿到事件
+      // - 非被动才能调用 preventDefault 阻止页面滚动
+      container.addEventListener('wheel', this._gridWheelHandler, { capture: true, passive: false });
     },
 
     /**
@@ -292,42 +479,34 @@ export default {
         } catch (error) {
           // 激活默认工具失败，静默处理
         }
-        
-        // 只在第一个视口加载当前系列
-        if (currentSeries && currentSeries.children.length > 0 && totalSlots > 0) {
-          const viewport = viewports[0];
-          
-          if (viewport) {
-            // 构建系列的图像ID列表
-            const imageIds = currentSeries.children.map(img => buildImageId(img));
-            
-            // 创建 stack 对象
-            const stack = {
-              imageIds: imageIds,
-              currentImageIdIndex: 0
-            };
-            
-            // 先添加 stack tool state（必须在加载图像之前）
-            this.$cornerstoneTools.addToolState(viewport, 'stack', stack);
-            
-            // 加载第一张图像
-            try {
-              const image = await this.$cornerstone.loadImage(imageIds[0]);
-              this.$cornerstone.displayImage(viewport, image);
-              
-              // 先存储视口与系列的映射关系（必须在添加信息覆盖层之前）
-              viewport.dataset.seriesIndex = activeSeriesIndex;
-              
-              // 添加系列信息标签（此时 seriesIndex 已设置）
-              this.addSeriesInfoLabel(viewport, currentSeries, activeSeriesIndex);
-              
-            } catch (error) {
-              // 加载失败，忽略
-              console.error('加载图像到网格视口失败:', error);
+
+        // 使用统一的系列加载逻辑初始化当前活动系列到第一个视口
+        if (currentSeries && currentSeries.children && currentSeries.children.length > 0 && totalSlots > 0) {
+          try {
+            if (typeof this.loadSeriesToGridViewport === 'function') {
+              console.log('[gridLayoutMixin][loadMultipleSeriesToGrid] 初始化当前系列到第一个视口', {
+                activeSeriesIndex,
+                childrenLength: currentSeries.children.length,
+                totalSlots
+              });
+              await this.loadSeriesToGridViewport(activeSeriesIndex, 0);
+            } else {
+              console.warn('[gridLayoutMixin][loadMultipleSeriesToGrid] loadSeriesToGridViewport 不存在，无法初始化当前系列', {
+                hasLoader: typeof this.loadSeriesToGridViewport === 'function'
+              });
             }
+          } catch (error) {
+            console.error('[gridLayoutMixin][loadMultipleSeriesToGrid] 初始化当前系列到网格视口失败', error);
           }
+        } else {
+          console.log('[gridLayoutMixin][loadMultipleSeriesToGrid] 跳过初始化当前系列到视口', {
+            hasSeries: !!currentSeries,
+            hasChildren: currentSeries && Array.isArray(currentSeries.children),
+            childrenLength: currentSeries && Array.isArray(currentSeries.children) ? currentSeries.children.length : 0,
+            totalSlots
+          });
         }
-        
+
         // 默认选择第一个视口
         if (totalSlots > 0) {
           this.selectGridViewport(0);

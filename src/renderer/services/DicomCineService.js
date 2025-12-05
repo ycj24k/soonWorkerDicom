@@ -99,83 +99,63 @@ export class DicomCineService {
       const imagesInAcquisition = this.dicomService.getTagValue(dicomInfo, 'x00201002') || this.dicomService.getTagValue(dicomInfo, '00201002');
       const numberOfSlices = this.dicomService.getTagValue(dicomInfo, 'x00540081') || this.dicomService.getTagValue(dicomInfo, '00540081');
 
-      // 如果有帧数信息且大于1，则为动态影像
-      if (numberOfFrames && parseInt(numberOfFrames) > 1) {
-        const result = {
-          isCine: true,
-          frameCount: parseInt(numberOfFrames),
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'multi-frame'
-        };
-        return result;
+      // 获取文件大小，用于合理性检查
+      const fs = require('fs');
+      let fileSize = 0;
+      try {
+        if (fs.existsSync(dicomFilePath)) {
+          const stats = fs.statSync(dicomFilePath);
+          fileSize = stats.size;
+        }
+      } catch (error) {
+        // 无法获取文件大小，忽略
       }
 
-      // 检查心脏相关标签
+      // 最可靠的检测：Number of Frames (0028,0008) - DICOM标准标签
+      // 这是唯一能准确表示单个文件包含帧数的标签
+      if (numberOfFrames) {
+        const frameCount = parseInt(numberOfFrames);
+        if (frameCount > 1) {
+          // 合理性检查：如果文件很小（<1MB），但帧数很大（>100），可能是误判
+          // 动态影像文件通常比较大，因为包含多帧图像数据
+          if (fileSize > 0 && fileSize < 1024 * 1024 && frameCount > 100) {
+            // 文件太小但帧数太多，可能是标签值错误，不判定为动态影像
+            if (process.env.NODE_ENV === 'development') {
+              console.warn(`文件 ${dicomFilePath} 大小 ${(fileSize / 1024).toFixed(2)}KB，但帧数 ${frameCount}，可能是误判，跳过动态影像检测`);
+            }
+            return { isCine: false };
+          }
+
+          const result = {
+            isCine: true,
+            frameCount: frameCount,
+            frameTime: frameTime,
+            heartRate: heartRate,
+            type: 'multi-frame'
+          };
+          return result;
+        }
+      }
+
+      // 检查心脏相关标签（需要结合其他条件，更严格）
+      // Cardiac Number of Images (0018,1016) 通常用于心脏序列，但需要结合其他标签确认
       if (cardiacNumberOfImages && parseInt(cardiacNumberOfImages) > 1) {
-        return {
-          isCine: true,
-          frameCount: parseInt(cardiacNumberOfImages),
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'cardiac'
-        };
+        const cardiacCount = parseInt(cardiacNumberOfImages);
+        // 需要同时有帧时间或心率信息，且文件大小合理
+        if ((frameTime || heartRate) && (fileSize === 0 || fileSize > 512 * 1024 || cardiacCount < 100)) {
+          return {
+            isCine: true,
+            frameCount: cardiacCount,
+            frameTime: frameTime,
+            heartRate: heartRate,
+            type: 'cardiac'
+          };
+        }
       }
 
-      // 检查帧时间信息
-      if (frameTime && parseFloat(frameTime) > 0) {
-        return {
-          isCine: true,
-          frameCount: 2, // 默认至少有2帧
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'time-series'
-        };
-      }
-
-      // 检查时间位置信息
-      if (numberOfTemporalPositions && parseInt(numberOfTemporalPositions) > 1) {
-        return {
-          isCine: true,
-          frameCount: parseInt(numberOfTemporalPositions),
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'temporal'
-        };
-      }
-
-      // 检查采集中的图像数量
-      if (imagesInAcquisition && parseInt(imagesInAcquisition) > 1) {
-        return {
-          isCine: true,
-          frameCount: parseInt(imagesInAcquisition),
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'acquisition'
-        };
-      }
-
-      // 检查切片数量
-      if (numberOfSlices && parseInt(numberOfSlices) > 1) {
-        return {
-          isCine: true,
-          frameCount: parseInt(numberOfSlices),
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'multi-slice'
-        };
-      }
-
-      // 检查帧增量指针（表示有多个帧）
-      if (frameIncrementPointer) {
-        return {
-          isCine: true,
-          frameCount: 2, // 默认至少有2帧
-          frameTime: frameTime,
-          heartRate: heartRate,
-          type: 'frame-increment'
-        };
-      }
+      // 其他标签（frameTime、numberOfTemporalPositions、imagesInAcquisition、numberOfSlices、frameIncrementPointer）
+      // 单独存在不足以判定为动态影像，因为这些标签可能出现在普通影像中
+      // 只有 Number of Frames (0028,0008) 是唯一可靠的单个文件帧数标签
 
       return { isCine: false };
 
@@ -219,7 +199,7 @@ export class DicomCineService {
   }
 
   /**
-   * 处理系列中的动态影像，将其分解为帧
+   * 处理系列中的动态影像，将其分解为帧（优化：只检查第一张影像）
    * @param {Object} seriesNode - 系列节点
    * @returns {Object} 处理后的系列节点
    */
@@ -233,52 +213,50 @@ export class DicomCineService {
       return seriesNode;
     }
 
-    const processedChildren = [];
-    
-    for (const child of seriesNode.children) {
-      // 跳过已经是帧节点的子节点（避免重复处理）
-      if (child.isFrame) {
-        processedChildren.push(child);
-        continue;
-      }
+    // 优化：只检查第一张影像来确定整个系列是否为动态影像
+    // 通常一个系列中的所有影像都是同一类型（要么都是动态，要么都是静态）
+    const firstChild = seriesNode.children.find(child => 
+      child.isFile && 
+      !child.isFrame && 
+      this.dicomService.isDicomFile(child.name || child.path)
+    );
 
-      if (child.isFile && this.dicomService.isDicomFile(child.name || child.path)) {
-        const imagePath = child.fullPath || child.path;
-        if (imagePath) {
-          try {
-            // 检查是否为动态影像
-            const cineInfo = this.isCineImage(imagePath);
-            if (cineInfo && cineInfo.isCine && cineInfo.frameCount > 1) {
-              // 分解为帧
-              const frameNodes = this.extractFramesFromCineImage(child, cineInfo);
-              processedChildren.push(...frameNodes);
-              
-              // 保存原始动态影像信息到系列节点（用于帧播放模式）
-              if (!seriesNode.cineInfo) {
-                seriesNode.cineInfo = cineInfo;
-                seriesNode.cineImagePath = imagePath;
-              }
-            } else {
-              // 普通图像，直接添加
-              processedChildren.push(child);
-            }
-          } catch (error) {
-            // 处理失败时，作为普通图像添加
-            processedChildren.push(child);
+    if (firstChild) {
+      const imagePath = firstChild.fullPath || firstChild.path;
+      if (imagePath) {
+        try {
+          // 只检查第一张影像是否为动态影像
+          const cineInfo = this.isCineImage(imagePath);
+          if (cineInfo && cineInfo.isCine && cineInfo.frameCount > 1) {
+            // 第一张是动态影像，分解为帧
+            const frameNodes = this.extractFramesFromCineImage(firstChild, cineInfo);
+            
+            // 保存原始动态影像信息到系列节点
+            seriesNode.cineInfo = cineInfo;
+            seriesNode.cineImagePath = imagePath;
+            
+            // 更新系列的子节点：第一张分解为帧，其他保持原样（假设它们也是动态影像）
+            // 注意：如果系列中有多个动态影像文件，这里只处理第一个
+            // 其他动态影像文件会在用户实际查看时再处理
+            seriesNode.children = [
+              ...frameNodes,
+              ...seriesNode.children.slice(1)
+            ];
+            seriesNode.processedForFrames = true;
+            return seriesNode;
           }
-        } else {
-          // 没有路径，作为普通节点添加
-          processedChildren.push(child);
+        } catch (error) {
+          // 检查失败，继续正常处理
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(`检查动态影像失败: ${imagePath}`, error);
+          }
         }
-      } else {
-        // 非文件节点，直接添加
-        processedChildren.push(child);
       }
     }
-    
-    // 更新系列的子节点
-    seriesNode.children = processedChildren;
-    seriesNode.processedForFrames = true; // 标记已处理
+
+    // 第一张不是动态影像，或者检查失败，保持原样
+    // 所有子节点都作为普通图像处理（不分解为帧）
+    seriesNode.processedForFrames = true; // 标记已处理，避免重复检查
     
     return seriesNode;
   }

@@ -87,7 +87,9 @@ export default {
     },
     getSeriesImageCount(index) {
       const series = this.$store.state.dicom.dicomSeries[index];
-      return series ? series.children.length : 0;
+      if (!series) return 0;
+      // 优先使用_totalImageCount（总数），如果没有则使用children.length
+      return series._totalImageCount || series.imageCount || series.children.length || 0;
     },
     getSeriesLoadedCount(index) {
       const series = this.$store.state.dicom.dicomSeries[index];
@@ -102,7 +104,24 @@ export default {
     },
     getSeriesTotalCount(index) {
       const series = this.$store.state.dicom.dicomSeries[index];
-      return series && Array.isArray(series.children) ? series.children.length : 0;
+      if (!series) return 0;
+      
+      // 如果正在加载该系列，使用进度条中的总数（已正确计算动态影像的帧数）
+      const progress = this.$store.state.dicom.seriesProgress;
+      if (progress && progress.isActive && progress.currentSeriesIndex === index) {
+        return progress.currentTotal || 0;
+      }
+      
+      // 否则，检查是否为动态影像系列
+      const isDynamicSeries = series.cineInfo && series.cineInfo.isCine && series.cineInfo.frameCount > 1;
+      
+      if (isDynamicSeries) {
+        // 动态影像：使用children.length（帧数），因为动态影像已经分解为帧
+        return Array.isArray(series.children) ? series.children.length : 0;
+      } else {
+        // 普通影像：使用_totalImageCount（文件数）或children.length
+        return series._totalImageCount || series.imageCount || (Array.isArray(series.children) ? series.children.length : 0) || 0;
+      }
     }
   }
 };

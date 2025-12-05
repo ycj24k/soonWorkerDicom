@@ -211,52 +211,132 @@ export class DicomStructureService {
   groupSeriesByDicomTags(imageNodes) {
     const seriesMap = new Map();
     
+    // 优化：先按目录分组，每个目录只解析第一张影像
+    const directoryGroups = new Map();
+    
+    // 第一步：按目录分组影像节点（不解析）
     imageNodes.forEach((imageNode) => {
       if (!imageNode.isFile) return;
       
+      const dirPath = path.normalize(path.dirname(imageNode.path));
+      if (!directoryGroups.has(dirPath)) {
+        directoryGroups.set(dirPath, []);
+      }
+      directoryGroups.get(dirPath).push(imageNode);
+    });
+    
+    // 第二步：对每个目录，只解析第一张影像来确定系列信息
+    directoryGroups.forEach((nodesInDir, dirPath) => {
+      if (nodesInDir.length === 0) return;
+      
+      // 只解析该目录的第一张影像
+      const firstNode = nodesInDir[0];
+      let seriesInstanceUID = null;
+      let seriesInfo = null;
+      
       try {
-        // 解析DICOM文件获取关键标签
-        const dicomData = this.dicomService.parseDicomFile(imageNode.path);
+        const dicomData = this.dicomService.parseDicomFile(firstNode.path);
         if (dicomData && dicomData.elements) {
-          // 使用 getTagValue 方法获取标签值
-          const seriesInstanceUID = this.dicomService.getTagValue(dicomData, 'x0020000E') || this.dicomService.getTagValue(dicomData, '0020000E');
-          const studyInstanceUID = this.dicomService.getTagValue(dicomData, 'x0020000D') || this.dicomService.getTagValue(dicomData, '0020000D');
-          const patientID = this.dicomService.getTagValue(dicomData, 'x00100020') || this.dicomService.getTagValue(dicomData, '00100020');
-          const patientName = this.dicomService.getTagValue(dicomData, 'x00100010') || this.dicomService.getTagValue(dicomData, '00100010');
+          seriesInstanceUID = this.dicomService.getTagValue(dicomData, 'x0020000E') || this.dicomService.getTagValue(dicomData, '0020000E');
           
           if (seriesInstanceUID) {
-            if (!seriesMap.has(seriesInstanceUID)) {
-              // 创建新的系列对象
-              const modality = this.dicomService.getTagValue(dicomData, 'x00080060') || this.dicomService.getTagValue(dicomData, '00080060') || 'Unknown';
-              const seriesDescription = this.dicomService.getTagValue(dicomData, 'x0008103E') || this.dicomService.getTagValue(dicomData, '0008103E') || 'Unknown';
-              const seriesNumber = this.dicomService.getTagValue(dicomData, 'x00200011') || this.dicomService.getTagValue(dicomData, '00200011') || 'Unknown';
-              const studyDate = this.dicomService.getTagValue(dicomData, 'x00080020') || this.dicomService.getTagValue(dicomData, '00080020') || 'Unknown';
-              
-              seriesMap.set(seriesInstanceUID, {
-                name: `${seriesNumber}: ${seriesDescription}`,
-                path: path.normalize(path.dirname(imageNode.path)),
-                children: [],
+            // 获取系列信息（只解析一次）
+            const studyInstanceUID = this.dicomService.getTagValue(dicomData, 'x0020000D') || this.dicomService.getTagValue(dicomData, '0020000D');
+            const patientID = this.dicomService.getTagValue(dicomData, 'x00100020') || this.dicomService.getTagValue(dicomData, '00100020');
+            const patientName = this.dicomService.getTagValue(dicomData, 'x00100010') || this.dicomService.getTagValue(dicomData, '00100010');
+            const modality = this.dicomService.getTagValue(dicomData, 'x00080060') || this.dicomService.getTagValue(dicomData, '00080060') || 'Unknown';
+            const seriesDescription = this.dicomService.getTagValue(dicomData, 'x0008103E') || this.dicomService.getTagValue(dicomData, '0008103E') || 'Unknown';
+            const seriesNumber = this.dicomService.getTagValue(dicomData, 'x00200011') || this.dicomService.getTagValue(dicomData, '00200011') || 'Unknown';
+            const studyDate = this.dicomService.getTagValue(dicomData, 'x00080020') || this.dicomService.getTagValue(dicomData, '00080020') || 'Unknown';
+            
+            seriesInfo = {
+              name: `${seriesNumber}: ${seriesDescription}`,
+              path: dirPath,
+              children: [],
+              isFile: false,
+              seriesInstanceUID: seriesInstanceUID,
+              studyInstanceUID: studyInstanceUID,
+              patientID: patientID,
+              patientName: patientName,
+              modality: modality,
+              seriesDescription: seriesDescription,
+              seriesNumber: seriesNumber,
+              studyDate: studyDate,
+              imageCount: 0
+            };
+            
+            // 如果该系列已存在（不同目录可能有相同Series Instance UID），合并节点
+            if (seriesMap.has(seriesInstanceUID)) {
+              const existingSeries = seriesMap.get(seriesInstanceUID);
+              // 优化：初始阶段只保留第一张影像，其他影像在后台加载时再添加
+              // 但需要记录总数，以便进度条显示
+              if (existingSeries.children.length === 0 || existingSeries.children.length === 1) {
+                // 如果现有系列只有第一张或为空，添加第一张
+                if (existingSeries.children.length === 0) {
+                  existingSeries.children.push(firstNode);
+                }
+                // 更新总数（但不添加所有节点到children）
+                existingSeries._totalImageCount = (existingSeries._totalImageCount || 0) + nodesInDir.length;
+                existingSeries.imageCount = existingSeries._totalImageCount;
+              } else {
+                // 如果已有多个节点，说明是后台加载阶段，可以添加所有节点
+                existingSeries.children.push(...nodesInDir);
+                existingSeries.imageCount += nodesInDir.length;
+              }
+            } else {
+              // 创建新系列，初始阶段只添加第一张影像
+              seriesInfo.children = [firstNode]; // 只保留第一张影像
+              seriesInfo._totalImageCount = nodesInDir.length; // 记录总数
+              seriesInfo.imageCount = nodesInDir.length; // 用于显示总数
+              seriesInfo._allImageNodes = nodesInDir; // 保存所有节点引用，供后台加载使用
+              seriesMap.set(seriesInstanceUID, seriesInfo);
+            }
+          } else {
+            // 无法获取Series Instance UID，创建默认系列
+            const defaultSeriesUID = `default_${dirPath}`;
+            if (!seriesMap.has(defaultSeriesUID)) {
+              seriesMap.set(defaultSeriesUID, {
+                name: `默认系列 (${path.basename(dirPath)})`,
+                path: dirPath,
+                children: [firstNode], // 初始只保留第一张影像
                 isFile: false,
-                seriesInstanceUID: seriesInstanceUID,
-                studyInstanceUID: studyInstanceUID,
-                patientID: patientID,
-                patientName: patientName,
-                modality: modality,
-                seriesDescription: seriesDescription,
-                seriesNumber: seriesNumber,
-                studyDate: studyDate,
-                imageCount: 0
+                seriesInstanceUID: null,
+                studyInstanceUID: null,
+                patientID: null,
+                patientName: null,
+                modality: 'Unknown',
+                seriesDescription: '默认系列',
+                seriesNumber: '0',
+                studyDate: '',
+                _totalImageCount: nodesInDir.length,
+                imageCount: nodesInDir.length, // 用于显示总数
+                _allImageNodes: nodesInDir // 保存所有节点引用
               });
             }
-            
-            // 添加图像到系列
-            const series = seriesMap.get(seriesInstanceUID);
-            series.children.push(imageNode);
-            series.imageCount++;
           }
         }
       } catch (error) {
-        // 解析DICOM标签失败，跳过该节点
+        // 解析失败，创建默认系列
+        const defaultSeriesUID = `default_${dirPath}`;
+        if (!seriesMap.has(defaultSeriesUID)) {
+          seriesMap.set(defaultSeriesUID, {
+            name: `默认系列 (${path.basename(dirPath)})`,
+            path: dirPath,
+            children: [firstNode], // 初始只保留第一张影像
+            isFile: false,
+            seriesInstanceUID: null,
+            studyInstanceUID: null,
+            patientID: null,
+            patientName: null,
+            modality: 'Unknown',
+            seriesDescription: '默认系列',
+            seriesNumber: '0',
+            studyDate: '',
+            _totalImageCount: nodesInDir.length,
+            imageCount: nodesInDir.length, // 用于显示总数
+            _allImageNodes: nodesInDir // 保存所有节点引用
+          });
+        }
       }
     });
     

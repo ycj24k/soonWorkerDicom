@@ -199,10 +199,27 @@ export default {
      */
     async selectSeries(index) {
       try {
+        console.log('[imageLoaderMixin][selectSeries] 开始选择系列', {
+          seriesIndex: index,
+          isGridViewActive: this.isGridViewActive
+        });
+
         // 清理之前的播放状态
         this.cleanupPlayback();
 
         await this.selectDicomSeries(index);
+        
+        // 获取系列信息用于日志
+        const availableSeries = this.$store.state.dicom.dicomSeries;
+        const series = availableSeries && availableSeries[index];
+        const isDynamicSeries = series && series.cineInfo && series.cineInfo.isCine && series.cineInfo.frameCount > 1;
+        console.log('[imageLoaderMixin][selectSeries] 系列选择完成', {
+          seriesIndex: index,
+          isDynamicSeries,
+          cineInfo: series && series.cineInfo,
+          childrenLength: series && Array.isArray(series.children) ? series.children.length : 0,
+          isGridViewActive: this.isGridViewActive
+        });
         
         if (this.isGridViewActive) {
           // 在网格模式下，先检查该系列是否已经在某个视口中
@@ -210,6 +227,11 @@ export default {
             ? this.getGridViewportElements()
             : [];
           let foundViewportIndex = -1;
+          
+          console.log('[imageLoaderMixin][selectSeries] 检查系列是否已在视口中', {
+            seriesIndex: index,
+            viewportCount: viewports.length
+          });
           
           for (let i = 0; i < viewports.length; i++) {
             const viewportSeriesIndex = viewports[i].dataset.seriesIndex;
@@ -224,17 +246,34 @@ export default {
           
           if (foundViewportIndex >= 0) {
             // 如果系列已经在某个视口中，直接选中该视口
+            console.log('[imageLoaderMixin][selectSeries] 系列已在视口中，直接选中', {
+              seriesIndex: index,
+              viewportIndex: foundViewportIndex
+            });
             this.selectGridViewport(foundViewportIndex);
           } else {
             // 如果系列不在任何视口中，加载到当前选中的视口
             const selectedViewportIndex = this.$store.state.viewer.gridViewState.selectedViewportIndex;
+            console.log('[imageLoaderMixin][selectSeries] 系列不在视口中，加载到当前选中视口', {
+              seriesIndex: index,
+              selectedViewportIndex,
+              isDynamicSeries
+            });
             await this.loadSeriesToGridViewport(index, selectedViewportIndex);
           }
         } else {
           // 在单视图模式下，正常加载
+          console.log('[imageLoaderMixin][selectSeries] 单视图模式，加载当前图像', {
+            seriesIndex: index
+          });
           await this.loadCurrentImage();
         }
       } catch (error) {
+        console.error('[imageLoaderMixin][selectSeries] 选择系列失败', {
+          seriesIndex: index,
+          error: error.message || error.toString(),
+          errorStack: error.stack
+        });
         errorHandler.handleError(error, 'selectSeries');
       }
     },
@@ -244,12 +283,19 @@ export default {
      */
     async loadSeriesToGridViewport(seriesIndex, viewportIndex) {
       try {
+        console.log('[imageLoaderMixin][loadSeriesToGridViewport] 开始加载系列到视口', {
+          seriesIndex,
+          viewportIndex
+        });
         const viewports = typeof this.getGridViewportElements === 'function'
           ? this.getGridViewportElements()
           : [];
         
         if (!viewports[viewportIndex]) {
-          console.error('无效的视口索引:', viewportIndex);
+          console.error('[imageLoaderMixin][loadSeriesToGridViewport] 无效的视口索引', {
+            viewportIndex,
+            viewportCount: viewports.length
+          });
           return;
         }
         
@@ -258,12 +304,105 @@ export default {
         const series = availableSeries[seriesIndex];
 
         if (!series || !series.children || series.children.length === 0) {
-          console.error('无效的系列或系列无图像:', seriesIndex);
+          console.error('[imageLoaderMixin][loadSeriesToGridViewport] 无效的系列或系列无图像', {
+            seriesIndex,
+            hasSeries: !!series,
+            childrenLength: series && Array.isArray(series.children) ? series.children.length : 0
+          });
           return;
         }
 
+        // 检查是否为动态影像系列
+        const isDynamicSeries = series.cineInfo && series.cineInfo.isCine && series.cineInfo.frameCount > 1;
+        console.log('[imageLoaderMixin][loadSeriesToGridViewport] 系列信息检查', {
+          seriesIndex,
+          isDynamicSeries,
+          cineInfo: series.cineInfo,
+          childrenLength: series.children.length,
+          firstChildType: series.children[0] ? {
+            isFrame: series.children[0].isFrame,
+            isFile: series.children[0].isFile,
+            hasParentCineImage: !!series.children[0].parentCineImage,
+            frameIndex: series.children[0].frameIndex,
+            path: series.children[0].path || series.children[0].fullPath
+          } : null
+        });
+
         // 构建系列的图像ID列表
-        const imageIds = series.children.map(img => buildImageId(img));
+        // 优化：初始阶段只构建已加载的影像（children中只有第一张），后台加载时会逐步添加
+        const imageIdsWithDetails = series.children.map((img, idx) => {
+          const imageId = buildImageId(img);
+          return {
+            index: idx,
+            imageId,
+            isFrame: img.isFrame,
+            frameIndex: img.frameIndex,
+            path: img.path || img.fullPath,
+            hasParentCineImage: !!img.parentCineImage
+          };
+        });
+        const imageIds = imageIdsWithDetails.map(item => item.imageId).filter(id => id !== null);
+        const failedBuilds = imageIdsWithDetails.filter(item => !item.imageId);
+
+        console.log('[imageLoaderMixin][loadSeriesToGridViewport] 构建 imageIds 完成', {
+          seriesIndex,
+          viewportIndex,
+          childrenLength: series.children.length,
+          imageIdsLength: imageIds.length,
+          failedBuildsCount: failedBuilds.length,
+          isDynamicSeries,
+          firstImageId: imageIds[0] ? imageIds[0].substring(0, 150) : null,
+          firstImageIdHasFrame: imageIds[0] ? imageIds[0].includes('?frame=') : false,
+          firstChildDetails: imageIdsWithDetails[0],
+          failedBuildsDetails: failedBuilds.slice(0, 3) // 只显示前3个失败的
+        });
+
+        if (failedBuilds.length > 0) {
+          console.warn('[imageLoaderMixin][loadSeriesToGridViewport] 部分节点构建 imageId 失败', {
+            totalFailed: failedBuilds.length,
+            samples: failedBuilds.slice(0, 5)
+          });
+        }
+
+        // 关键修复：如果是动态影像系列，但第一个 imageId 没有 ?frame= 参数，说明帧节点可能没有正确构建
+        // 尝试从 cineImagePath 和 cineInfo 手动构建所有帧的 imageId
+        if (isDynamicSeries && imageIds.length > 0 && !imageIds[0].includes('?frame=')) {
+          const cineImagePath = series.cineImagePath || (series.children[0] && (series.children[0].fullPath || series.children[0].path));
+          if (cineImagePath) {
+            console.warn('[imageLoaderMixin][loadSeriesToGridViewport] 检测到动态影像系列但 imageId 缺少 frame 参数，尝试修复', {
+              seriesIndex,
+              cineImagePath: cineImagePath.substring(0, 100),
+              originalFirstImageId: imageIds[0].substring(0, 100),
+              childrenLength: series.children.length,
+              expectedFrameCount: series.cineInfo.frameCount
+            });
+            // 重新构建所有帧的 imageId
+            // 使用 children.length 作为帧数（因为动态影像已经分解为帧节点）
+            const normalizedPath = cineImagePath.replace(/\\/g, '/');
+            const encodedPath = encodeURI(normalizedPath);
+            const frameCount = series.children.length; // 使用 children 数量作为帧数
+            const fixedImageIds = [];
+            for (let frameIdx = 0; frameIdx < frameCount; frameIdx++) {
+              fixedImageIds.push(`wadouri:${encodedPath}?frame=${frameIdx}`);
+            }
+            console.log('[imageLoaderMixin][loadSeriesToGridViewport] 已修复动态影像帧 imageIds', {
+              seriesIndex,
+              oldLength: imageIds.length,
+              newLength: fixedImageIds.length,
+              firstFixedImageId: fixedImageIds[0].substring(0, 150),
+              lastFixedImageId: fixedImageIds[fixedImageIds.length - 1].substring(0, 150)
+            });
+            // 更新 imageIds 数组（但保持引用，因为后面还要用）
+            imageIds.length = 0;
+            imageIds.push(...fixedImageIds);
+          } else {
+            console.error('[imageLoaderMixin][loadSeriesToGridViewport] 动态影像系列缺少 cineImagePath，无法修复 imageIds', {
+              seriesIndex,
+              cineImagePath: series.cineImagePath,
+              firstChildPath: series.children[0] ? (series.children[0].fullPath || series.children[0].path) : null
+            });
+          }
+        }
 
         // 获取当前活动的图像索引（如果当前系列是活动系列）
         const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
@@ -271,6 +410,12 @@ export default {
         const currentImageIndex = (seriesIndex === activeSeriesIndex) 
           ? Math.max(0, Math.min(activeImageIndex, imageIds.length - 1))
           : 0;
+        
+        // 如果imageIds为空，说明没有可用的影像
+        if (imageIds.length === 0) {
+          console.warn(`系列 ${seriesIndex} 没有可用的影像`);
+          return;
+        }
 
         // 先存储视口与系列的映射关系（必须在第一时间设置）
         viewport.dataset.seriesIndex = seriesIndex;
@@ -287,19 +432,81 @@ export default {
           // 更新现有的 stack state（先更新索引，确保事件触发时能读取到正确值）
           existingStackState.data[0].currentImageIdIndex = currentImageIndex;
           existingStackState.data[0].imageIds = imageIds;
+          console.log('[imageLoaderMixin][loadSeriesToGridViewport] 更新现有 stackState', {
+            currentImageIdIndex: currentImageIndex,
+            imageIdsLength: imageIds.length
+          });
         } else {
           // 添加新的 stack state
           this.$cornerstoneTools.addToolState(viewport, 'stack', stack);
+          console.log('[imageLoaderMixin][loadSeriesToGridViewport] 添加新的 stackState', {
+            currentImageIdIndex: currentImageIndex,
+            imageIdsLength: imageIds.length
+          });
         }
 
         // 加载当前索引对应的图像
-        const image = await this.$cornerstone.loadImage(imageIds[currentImageIndex]);
+        const targetImageId = imageIds[currentImageIndex];
+        console.log('[imageLoaderMixin][loadSeriesToGridViewport] 准备加载图像', {
+          seriesIndex,
+          viewportIndex,
+          currentImageIndex,
+          targetImageId: targetImageId ? targetImageId.substring(0, 150) : null,
+          targetImageIdFull: targetImageId, // 完整 imageId，用于调试
+          isDynamicSeries,
+          isFrameImage: targetImageId && targetImageId.includes('?frame='),
+          frameParam: targetImageId && targetImageId.includes('?frame=') 
+            ? targetImageId.match(/\?frame=(\d+)/)?.[1] 
+            : null
+        });
+
+        let image;
+        try {
+          image = await this.$cornerstone.loadImage(targetImageId);
+          console.log('[imageLoaderMixin][loadSeriesToGridViewport] 图像加载成功', {
+            seriesIndex,
+            viewportIndex,
+            currentImageIndex,
+            imageWidth: image ? image.width : null,
+            imageHeight: image ? image.height : null,
+            imageRows: image ? image.rows : null,
+            imageColumns: image ? image.columns : null
+          });
+        } catch (loadError) {
+          console.error('[imageLoaderMixin][loadSeriesToGridViewport] 图像加载失败', {
+            seriesIndex,
+            viewportIndex,
+            currentImageIndex,
+            targetImageId: targetImageId ? targetImageId.substring(0, 100) : null,
+            error: loadError.message || loadError.toString(),
+            errorStack: loadError.stack
+          });
+          throw loadError; // 重新抛出错误，让调用者知道加载失败
+        }
+
         // 在 displayImage 之前再次确保 stack state 正确（防止事件触发时读取到旧值）
         const preDisplayStackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
         if (preDisplayStackState && preDisplayStackState.data && preDisplayStackState.data.length > 0) {
           preDisplayStackState.data[0].currentImageIdIndex = currentImageIndex;
         }
-        this.$cornerstone.displayImage(viewport, image);
+
+        try {
+          this.$cornerstone.displayImage(viewport, image);
+          console.log('[imageLoaderMixin][loadSeriesToGridViewport] 图像显示成功', {
+            seriesIndex,
+            viewportIndex,
+            currentImageIndex
+          });
+        } catch (displayError) {
+          console.error('[imageLoaderMixin][loadSeriesToGridViewport] 图像显示失败', {
+            seriesIndex,
+            viewportIndex,
+            currentImageIndex,
+            error: displayError.message || displayError.toString(),
+            errorStack: displayError.stack
+          });
+          throw displayError; // 重新抛出错误
+        }
 
         // 更新或添加系列信息标签
         // 先移除旧标签
@@ -319,6 +526,37 @@ export default {
           finalStackState.data[0].currentImageIdIndex = currentImageIndex;
           // 确保 imageIds 也是最新的
           finalStackState.data[0].imageIds = imageIds;
+          console.log('[imageLoaderMixin][loadSeriesToGridViewport] 最终 stackState 同步完成', {
+            currentImageIdIndex: currentImageIndex,
+            imageIdsLength: imageIds.length
+          });
+        }
+
+        // 确保当前视口启用了滚轮堆栈切换工具（StackScrollMouseWheel）
+        try {
+          const tools = this.$cornerstoneTools;
+          if (tools && tools.StackScrollMouseWheelTool) {
+            try {
+              // 为该视口注册滚轮工具（如果已经注册会抛异常，忽略即可）
+              tools.addToolForElement(viewport, tools.StackScrollMouseWheelTool);
+            } catch (e) {
+              // 可能已经添加过，静默处理
+            }
+            try {
+              // 针对该视口激活滚轮切换工具（不占用鼠标按钮）
+              tools.setToolActiveForElement(viewport, 'StackScrollMouseWheel', {});
+              console.log('[imageLoaderMixin][loadSeriesToGridViewport] 已为视口激活 StackScrollMouseWheel 工具', {
+                seriesIndex,
+                viewportIndex
+              });
+            } catch (e) {
+              console.warn('[imageLoaderMixin][loadSeriesToGridViewport] 激活 StackScrollMouseWheel 工具失败', e);
+            }
+          } else {
+            console.warn('[imageLoaderMixin][loadSeriesToGridViewport] StackScrollMouseWheelTool 不可用，无法启用滚轮切换');
+          }
+        } catch (e) {
+          console.error('[imageLoaderMixin][loadSeriesToGridViewport] 配置滚轮切换工具时出错', e);
         }
 
         // 等待图像渲染完成后再更新视口信息（确保 image no 正确显示）
@@ -332,6 +570,19 @@ export default {
         }, 0);
 
       } catch (error) {
+        console.error('[imageLoaderMixin][loadSeriesToGridViewport] 加载系列到视口失败', {
+          seriesIndex,
+          viewportIndex,
+          error: error.message || error.toString(),
+          errorStack: error.stack,
+          errorName: error.name,
+          seriesInfo: {
+            hasSeries: !!series,
+            childrenLength: series && Array.isArray(series.children) ? series.children.length : 0,
+            isDynamicSeries: series && series.cineInfo && series.cineInfo.isCine,
+            cineInfo: series && series.cineInfo
+          }
+        });
         errorHandler.handleError(error, 'loadSeriesToGridViewport');
       }
     },

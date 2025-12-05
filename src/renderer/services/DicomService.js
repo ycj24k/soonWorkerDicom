@@ -310,7 +310,7 @@ export class DicomService {
   }
 
   /**
-   * 检测是否为动态影像系列
+   * 检测是否为动态影像系列（优化：只检查每个系列的第一张影像）
    * @param {Array<Object>} seriesNodes - 系列节点数组
    * @returns {Object|boolean} 如果是动态影像，返回包含动态影像信息的对象；否则返回false
    */
@@ -319,21 +319,24 @@ export class DicomService {
       return false;
     }
 
-    // 检查每个系列中的DICOM文件，看是否有真正的动态影像
+    // 检查每个系列的第一张DICOM文件，看是否有真正的动态影像
     for (const series of seriesNodes) {
       if (!series.children || series.children.length === 0) {
         continue;
       }
       
-      // 优先检查第一个DICOM文件（通常第一个文件就能确定整个系列的类型）
-      for (const imageNode of series.children) {
+      // 只检查第一个DICOM文件（通常第一个文件就能确定整个系列的类型）
+      // 优化：不遍历所有影像，只检查第一张，避免大目录时加载所有文件
+      const firstImageNode = series.children.find(child => {
         // 跳过帧节点，只检查原始文件节点
-        if (imageNode.isFrame) {
-          continue;
+        if (child.isFrame) {
+          return false;
         }
+        return child.isFile && this.isDicomFile(child.name || child.path);
+      });
 
-        if (imageNode.isFile && this.isDicomFile(imageNode.name || imageNode.path)) {
-          const imagePath = imageNode.fullPath || imageNode.path;
+      if (firstImageNode) {
+        const imagePath = firstImageNode.fullPath || firstImageNode.path;
           if (imagePath) {
             try {
             // 检测单个文件是否为动态影像
@@ -348,7 +351,9 @@ export class DicomService {
                 };
               }
             } catch (error) {
-              // 检测失败时记录错误但继续检查其他文件
+            // 检测失败时记录错误但继续检查其他系列
+            if (process.env.NODE_ENV === 'development') {
+              console.warn(`检测动态影像失败: ${imagePath}`, error);
             }
           }
         }
