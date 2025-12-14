@@ -120,9 +120,7 @@ export class DicomCineService {
           // 动态影像文件通常比较大，因为包含多帧图像数据
           if (fileSize > 0 && fileSize < 1024 * 1024 && frameCount > 100) {
             // 文件太小但帧数太多，可能是标签值错误，不判定为动态影像
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(`文件 ${dicomFilePath} 大小 ${(fileSize / 1024).toFixed(2)}KB，但帧数 ${frameCount}，可能是误判，跳过动态影像检测`);
-            }
+            // 文件太小但帧数太多，可能是误判，跳过动态影像检测
             return { isCine: false };
           }
 
@@ -160,7 +158,7 @@ export class DicomCineService {
       return { isCine: false };
 
     } catch (error) {
-      console.error(`检测动态影像失败: ${dicomFilePath}`, error);
+      // 检测失败，静默返回非动态影像
       return { isCine: false };
     }
   }
@@ -247,9 +245,7 @@ export class DicomCineService {
           }
         } catch (error) {
           // 检查失败，继续正常处理
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(`检查动态影像失败: ${imagePath}`, error);
-          }
+          // 检查失败，继续正常处理
         }
       }
     }

@@ -186,7 +186,7 @@ export class DicomThumbnailService {
    * @returns {Array} 关键标签数组
    */
   parseKeyDicomTags(dataSet) {
-    // 只解析显示所需的关键标签
+    // 解析21个关键标签（初始化加载时需要）
     const keyTags = [
       'x00080060', // Modality
       'x00200011', // Series Number
@@ -200,7 +200,15 @@ export class DicomThumbnailService {
       'x0020000d', // Study Instance UID
       'x00280010', // Rows
       'x00280011', // Columns
-      'x00280008'  // Number of Frames
+      'x00280008', // Number of Frames
+      'x00181063', // Frame Time
+      'x00181065', // Frame Time Vector
+      'x00181100', // Reconstruction Diameter
+      'x00181210', // Convolution Kernel
+      'x00181015', // Heart Rate
+      'x00181016', // Cardiac Number of Images
+      'x00181018', // Cardiac Cycle Time
+      'x00082111'  // Derivation Description
     ];
 
     const seriesDict = [];

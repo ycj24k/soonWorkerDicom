@@ -88,9 +88,7 @@ export class DicomService {
       });
       
     } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error('获取目录树失败:', error);
-      }
+      // 获取目录树失败，静默处理
     }
 
     return tree;
@@ -352,9 +350,7 @@ export class DicomService {
               }
             } catch (error) {
             // 检测失败时记录错误但继续检查其他系列
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(`检测动态影像失败: ${imagePath}`, error);
-            }
+            // 检测失败，继续下一个系列
           }
         }
       }
@@ -372,14 +368,12 @@ export class DicomService {
       
       // 检查文件是否存在
       if (!fs.existsSync(filePath)) {
-        console.error(`文件不存在: ${filePath}`);
         return null;
       }
       
       const fileBuffer = fs.readFileSync(filePath);
       
       if (fileBuffer.length === 0) {
-        console.error(`文件为空: ${filePath}`);
         return null;
       }
       
@@ -475,7 +469,7 @@ export class DicomService {
         rawData: dicomData
       };
     } catch (error) {
-      console.error(`解析DICOM文件失败: ${filePath}`, error);
+      // 静默处理解析错误（某些DICOM文件可能有格式问题，但不影响整体流程）
       return null;
     }
   }

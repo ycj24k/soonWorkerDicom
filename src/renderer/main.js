@@ -28,6 +28,55 @@ if (!process.env.IS_WEB) Vue.use(require('vue-electron'))
 Vue.http = Vue.prototype.$http = axios
 Vue.config.productionTip = false
 
+// 过滤不需要的警告信息
+if (typeof console !== 'undefined' && console) {
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  
+  // 需要过滤的警告关键词
+  const filteredWarnings = [
+    'StackScrollMouseWheel has already been added',
+    'Image smallestPixelValue tag is incorrect',
+    'The provided colorLUT only provides',
+    'Vue Devtools',
+    'Download the Vue Devtools',
+    'DevTools 无法加载来源映射',
+    'Source map',
+    'Electron Security Warning',
+    'Canvas2D: Multiple readback operations',
+    'Violation',
+    'You are running Vue in development mode',
+    'run localStorage.setItem',
+    'Cornerstone Tools'
+  ];
+  
+  if (typeof originalWarn === 'function') {
+    console.warn = function() {
+      const args = Array.prototype.slice.call(arguments);
+      const message = args.join(' ');
+      const shouldFilter = filteredWarnings.some(function(keyword) {
+        return message.indexOf(keyword) !== -1;
+      });
+      if (!shouldFilter) {
+        originalWarn.apply(console, args);
+      }
+    };
+  }
+  
+  if (typeof originalError === 'function') {
+    console.error = function() {
+      const args = Array.prototype.slice.call(arguments);
+      const message = args.join(' ');
+      const shouldFilter = filteredWarnings.some(function(keyword) {
+        return message.indexOf(keyword) !== -1;
+      });
+      if (!shouldFilter) {
+        originalError.apply(console, args);
+      }
+    };
+  }
+}
+
 // 设置公共方法
 Vue.prototype.$accAdd = accAdd
 Vue.prototype.$accSub = accSub

@@ -291,56 +291,29 @@ export default {
         try {
           const activeIndex = this.$store.state.dicom.activeSeriesIndex;
           if (!Array.isArray(newSeries) || !Array.isArray(oldSeries)) {
-            console.log('[DicomViewer][watch dicomSeries] newSeries 或 oldSeries 非数组，跳过', {
-              newType: typeof newSeries,
-              oldType: typeof oldSeries
-            });
             return;
           }
           const newSeriesItem = newSeries[activeIndex];
           const oldSeriesItem = oldSeries[activeIndex];
           if (!newSeriesItem || !oldSeriesItem) {
-            console.log('[DicomViewer][watch dicomSeries] 当前活动系列不存在', {
-              activeIndex,
-              hasNew: !!newSeriesItem,
-              hasOld: !!oldSeriesItem
-            });
             return;
           }
           const newChildren = Array.isArray(newSeriesItem.children) ? newSeriesItem.children : [];
           const oldChildren = Array.isArray(oldSeriesItem.children) ? oldSeriesItem.children : [];
           // 只有在当前系列 children 数量真正增加时才重新同步
           if (newChildren.length <= oldChildren.length || newChildren.length === 0) {
-            if (newChildren.length !== oldChildren.length) {
-              console.log('[DicomViewer][watch dicomSeries] 当前系列 children 数量未增加或为空，跳过同步', {
-                activeIndex,
-                newLength: newChildren.length,
-                oldLength: oldChildren.length
-              });
-            }
             return;
           }
           // 仅在网格视图激活且系列加载方法存在时才尝试刷新当前视口
           if (!this.isGridViewActive || typeof this.loadSeriesToGridViewport !== 'function') {
-            console.log('[DicomViewer][watch dicomSeries] 网格未激活或加载方法不存在，跳过同步', {
-              isGridViewActive: this.isGridViewActive,
-              hasLoader: typeof this.loadSeriesToGridViewport === 'function'
-            });
             return;
           }
           const viewportIndex = this.$store.state.viewer.gridViewState
             ? (this.$store.state.viewer.gridViewState.selectedViewportIndex || 0)
             : 0;
-          console.log('[DicomViewer][watch dicomSeries] 检测到当前系列 children 数量增加，准备刷新视口 stack', {
-            activeIndex,
-            viewportIndex,
-            oldLength: oldChildren.length,
-            newLength: newChildren.length
-          });
           this.loadSeriesToGridViewport(activeIndex, viewportIndex);
         } catch (error) {
           // 同步失败不影响主流程，静默处理
-          console.error('[DicomViewer][watch dicomSeries] 同步视口 stack 失败', error);
         }
       },
       deep: true
@@ -402,7 +375,7 @@ export default {
         await this.$store.dispatch('viewer/activateGridLayout', layout);
         await this.initializeGridView();
       } catch (error) {
-        console.error('初始化查看器失败', error);
+        // 初始化失败，静默处理
       }
     },
 

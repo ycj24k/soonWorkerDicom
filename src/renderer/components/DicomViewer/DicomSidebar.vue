@@ -93,31 +93,70 @@ export default {
     },
     getSeriesLoadedCount(index) {
       const series = this.$store.state.dicom.dicomSeries[index];
-      if (!series || !series.children) {
-        return 0;
-      }
-      const progress = this.$store.state.dicom.seriesProgress;
-      if (progress && progress.isActive && progress.currentSeriesIndex === index) {
-        return progress.currentLoaded;
-      }
-      return series.children.length;
-    },
-    getSeriesTotalCount(index) {
-      const series = this.$store.state.dicom.dicomSeries[index];
-      if (!series) return 0;
+      if (!series || !series.children) return 0;
       
-      // 如果正在加载该系列，使用进度条中的总数（已正确计算动态影像的帧数）
-      const progress = this.$store.state.dicom.seriesProgress;
-      if (progress && progress.isActive && progress.currentSeriesIndex === index) {
-        return progress.currentTotal || 0;
-      }
-      
-      // 否则，检查是否为动态影像系列
       const isDynamicSeries = series.cineInfo && series.cineInfo.isCine && series.cineInfo.frameCount > 1;
       
       if (isDynamicSeries) {
-        // 动态影像：使用children.length（帧数），因为动态影像已经分解为帧
-        return Array.isArray(series.children) ? series.children.length : 0;
+        // 统计动态影像已加载的文件数
+        // 重构后：后台加载会覆盖初始化数据，直接统计不同的 parentCineImage 路径即可
+        const normalizePath = (path) => {
+          if (!path) return null;
+          return path.replace(/\\/g, '/');
+        };
+        
+        const fileSet = new Set();
+        
+        // 从 children 中统计不同的文件路径
+        for (const child of series.children) {
+          if (child.isFrame && child.parentCineImage) {
+            const rawPath = child.parentCineImage.fullPath || child.parentCineImage.path;
+            const normalizedPath = normalizePath(rawPath);
+            if (normalizedPath) {
+              fileSet.add(normalizedPath);
+            }
+          } else if (child.isFile && !child.isFrame) {
+            const rawPath = child.fullPath || child.path;
+            const normalizedPath = normalizePath(rawPath);
+            if (normalizedPath) {
+              fileSet.add(normalizedPath);
+            }
+          }
+        }
+        
+        return fileSet.size;
+      } else {
+        return series.children.length;
+      }
+    },
+    getSeriesTotalCount(index) {
+      const series = this.$store.state.dicom.dicomSeries[index];
+      if (!series) {
+        return 0;
+      }
+      
+      // 检查是否为动态影像系列
+      const isDynamicSeries = series.cineInfo && series.cineInfo.isCine && series.cineInfo.frameCount > 1;
+      
+      if (isDynamicSeries) {
+        // 动态影像：显示影像文件数，而不是帧数
+        // 优先使用_totalImageCount（影像文件数）
+        if (series._totalImageCount !== undefined && series._totalImageCount !== null) {
+          return series._totalImageCount;
+        }
+        // 如果没有_totalImageCount，从_allImageNodes计算实际文件数
+        if (series._allImageNodes && Array.isArray(series._allImageNodes)) {
+          // 统计实际文件数（排除帧节点）
+          let fileCount = 0;
+          for (const node of series._allImageNodes) {
+            if (node.isFile && !node.isFrame) {
+              fileCount++;
+            }
+          }
+          return fileCount || 0;
+        }
+        // 最后回退：如果无法获取文件数，返回0
+        return 0;
       } else {
         // 普通影像：使用_totalImageCount（文件数）或children.length
         return series._totalImageCount || series.imageCount || (Array.isArray(series.children) ? series.children.length : 0) || 0;

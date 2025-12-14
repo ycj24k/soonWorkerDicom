@@ -174,12 +174,10 @@ const actions = {
       const structureAnalysis = dicomService.analyzeDicomStructure(directoryTree);
       
       if (!structureAnalysis) {
-        console.error('DICOM目录结构分析失败');
         throw new Error('DICOM目录结构分析失败');
       }
       
       if (structureAnalysis.seriesNodes.length === 0 && structureAnalysis.imageNodes.length === 0) {
-        console.error('未找到任何有效的DICOM文件');
         throw new Error('未找到任何有效的DICOM文件');
       }
 
@@ -253,10 +251,19 @@ const actions = {
         // 动态影像：总数应该是所有帧的总数
         // 如果_allImageNodes存在，需要计算所有文件的帧数总和
         if (series._allImageNodes && Array.isArray(series._allImageNodes)) {
-          // 计算所有动态影像文件的帧数总和，同时缓存cineInfo到节点上，避免重复读取文件
-          let totalFrames = 0;
-          for (const node of series._allImageNodes) {
-            if (node.isFile && !node.isFrame) {
+          // 优化：使用缓存的总数，避免重复计算
+          if (series._cachedTotalFrames !== undefined) {
+            total = series._cachedTotalFrames;
+          } else {
+            // 计算所有动态影像文件的帧数总和，同时缓存cineInfo到节点上
+            // 使用 requestAnimationFrame 分批处理，避免阻塞
+            const scheduleNext = () => new Promise((resolve) => requestAnimationFrame(resolve));
+            let totalFrames = 0;
+            const fileNodes = series._allImageNodes.filter(node => node.isFile && !node.isFrame);
+            const checkBatchSize = 10; // 每检查10个文件让出一次事件循环
+            
+            for (let nodeIdx = 0; nodeIdx < fileNodes.length; nodeIdx++) {
+              const node = fileNodes[nodeIdx];
               // 如果节点上已有缓存的cineInfo，直接使用（避免重复读取文件）
               if (node._cachedCineInfo !== undefined) {
                 const cineInfo = node._cachedCineInfo;
@@ -281,9 +288,15 @@ const actions = {
                   totalFrames += 1; // 解析失败，按普通文件处理
                 }
               }
+              
+              // 每处理一批文件后让出事件循环，避免阻塞
+              if ((nodeIdx + 1) % checkBatchSize === 0 || nodeIdx === fileNodes.length - 1) {
+                await scheduleNext();
+              }
             }
+            total = totalFrames;
+            series._cachedTotalFrames = total; // 缓存总数，避免重复计算
           }
-          total = totalFrames;
         } else {
           // 如果没有_allImageNodes，使用children.length（已经分解为帧）
           total = children.length;
@@ -316,113 +329,79 @@ const actions = {
       if (series._allImageNodes && Array.isArray(series._allImageNodes)) {
         const allNodes = series._allImageNodes;
         
-        // 使用 requestAnimationFrame 和 setTimeout 让出事件循环
-        const scheduleNext = () => new Promise((resolve) => {
-          requestAnimationFrame(() => {
-            setTimeout(resolve, 0);
-          });
-        });
+        // 优化：使用更轻量的方式让出事件循环，减少延迟
+        // 直接使用 requestAnimationFrame，不再使用双重延迟（requestAnimationFrame + setTimeout）
+        const scheduleNext = () => new Promise((resolve) => requestAnimationFrame(resolve));
         
-        // 对于动态影像，需要将文件节点分解为帧节点（异步批量处理，避免阻塞）
+        // 对于动态影像，需要将文件节点分解为帧节点（批量处理，减少让出次数）
         let targetCount;
         let nodesToProcess = [];
         
-        if (isDynamicSeries) {
-          // 动态影像：异步批量将文件节点分解为帧节点，避免一次性处理所有文件导致阻塞
-          const fileNodesToProcess = allNodes.filter(node => 
-            (node.isFile && !node.isFrame) || node.isFrame
-          );
+        // 重构：后台加载直接处理所有文件，覆盖初始化数据
+        // 不需要判断已处理/未处理，直接重新构建整个 children
+        const fileNodesToProcess = allNodes.filter(node => node.isFile && !node.isFrame);
+        
+        // 优化：批量处理文件，减少让出次数，提高性能
+        // 小系列（<100个文件）：每5个文件让出一次
+        // 中等系列（100-1000个文件）：每10个文件让出一次
+        // 大系列（>1000个文件）：每20个文件让出一次
+        const fileCount = fileNodesToProcess.length;
+        const fileBatchSize = fileCount < 100 ? 5 : (fileCount < 1000 ? 10 : 20);
+        
+        for (let fileIdx = 0; fileIdx < fileNodesToProcess.length; fileIdx++) {
+          const node = fileNodesToProcess[fileIdx];
+          const rawPath = node.fullPath || node.path;
           
-          // 对于超大数据集（超过10万帧），采用更激进的批量处理策略
-          // 批量处理文件节点，每批处理1个文件，避免阻塞
-          const fileBatchSize = 1; // 每次只处理1个文件，确保UI响应
-          
-          // 对于超大数据集，在创建帧节点时也要让出事件循环
-          const isLargeDataset = total > 100000;
-          const frameBatchSize = isLargeDataset ? 1000 : 10000; // 每创建1000个帧节点让出一次
-          
-          for (let fileIdx = 0; fileIdx < fileNodesToProcess.length; fileIdx++) {
-            const node = fileNodesToProcess[fileIdx];
+          try {
+            let cineInfo = node._cachedCineInfo;
+            if (!cineInfo && rawPath) {
+              // 检查是否为动态影像（使用缓存避免重复读取）
+              cineInfo = dicomService.cineService.isCineImage(rawPath);
+              node._cachedCineInfo = cineInfo;
+            }
             
-            if (node.isFrame) {
-              // 已经是帧节点，直接添加
+            if (cineInfo && cineInfo.isCine && cineInfo.frameCount > 1) {
+              // 动态影像：分解为帧节点
+              const frameNodes = dicomService.cineService.extractFramesFromCineImage(node, cineInfo);
+              nodesToProcess.push(...frameNodes);
+            } else {
+              // 普通影像：直接添加文件节点
               nodesToProcess.push(node);
-            } else if (node.isFile && !node.isFrame) {
-              try {
-                // 优先使用缓存的cineInfo，避免重复读取文件
-                let cineInfo = node._cachedCineInfo;
-                if (!cineInfo) {
-                  // 如果没有缓存，才读取文件（这种情况应该很少，因为计算总数时已经缓存了）
-                  cineInfo = dicomService.cineService.isCineImage(node.path || node.fullPath);
-                  node._cachedCineInfo = cineInfo; // 缓存结果
-                }
-                
-                if (cineInfo && cineInfo.isCine && cineInfo.frameCount > 1) {
-                  // 分解为帧节点
-                  const frameNodes = dicomService.cineService.extractFramesFromCineImage(node, cineInfo);
-                  
-                  // 对于超大数据集，分批添加帧节点，避免一次性创建太多对象导致阻塞
-                  if (isLargeDataset && frameNodes.length > frameBatchSize) {
-                    // 分批添加帧节点
-                    for (let frameIdx = 0; frameIdx < frameNodes.length; frameIdx += frameBatchSize) {
-                      const frameBatch = frameNodes.slice(frameIdx, frameIdx + frameBatchSize);
-                      nodesToProcess.push(...frameBatch);
-                      
-                      // 每批帧节点添加后让出事件循环
-                      if (frameIdx + frameBatchSize < frameNodes.length) {
-                        // eslint-disable-next-line no-await-in-loop
-                        await scheduleNext();
-                      }
-                    }
-                  } else {
-                    // 小数据集，直接添加所有帧节点
-                    nodesToProcess.push(...frameNodes);
-                  }
-                } else {
-                  // 普通文件，直接添加
-                  nodesToProcess.push(node);
-                }
-              } catch (error) {
-                // 解析失败，按普通文件处理
-                nodesToProcess.push(node);
-              }
             }
-            
-            // 每处理一个文件后让出事件循环，避免阻塞UI
-            if ((fileIdx + 1) % fileBatchSize === 0 || fileIdx === fileNodesToProcess.length - 1) {
-              // eslint-disable-next-line no-await-in-loop
-              await scheduleNext();
-            }
+          } catch (error) {
+            // 处理失败，作为普通文件添加
+            nodesToProcess.push(node);
           }
           
-          targetCount = nodesToProcess.length;
-        } else {
-          // 普通影像：直接使用文件节点
-          nodesToProcess = allNodes;
-          targetCount = allNodes.length;
+          // 批量处理文件后让出事件循环，减少延迟
+          if ((fileIdx + 1) % fileBatchSize === 0 || fileIdx === fileNodesToProcess.length - 1) {
+            await scheduleNext();
+          }
         }
+        
+        targetCount = nodesToProcess.length;
         
         const currentCount = children.length; // 当前已加载的数量（通常是1，动态影像可能是帧数）
         const remainingCount = targetCount - currentCount;
         
-        // 优化批量大小：减少单次操作时间，避免长时间阻塞
-        // 对于超大数据集（超过10万），使用更大的批量大小，减少 commit 次数
+        // 优化批量大小：增加批量大小，减少让出次数，提高性能
+        // 不再每批都让出，而是处理更多节点后再让出
         let addBatchSize;
         if (remainingCount > 100000) {
-          // 超大数据集：每批1000-5000个，减少 commit 次数
-          addBatchSize = Math.max(1000, Math.floor(remainingCount / 200));
+          // 超大数据集：每批5000-10000个
+          addBatchSize = Math.max(5000, Math.floor(remainingCount / 50));
         } else if (remainingCount > 10000) {
-          // 大数据集：每批100-500个
-          addBatchSize = Math.max(100, Math.floor(remainingCount / 100));
-        } else if (remainingCount < 50) {
-          // 小系列：每批5-10个
-          addBatchSize = Math.max(5, Math.floor(remainingCount / 10));
+          // 大数据集：每批1000-2000个
+          addBatchSize = Math.max(1000, Math.floor(remainingCount / 30));
+        } else if (remainingCount < 100) {
+          // 小系列：一次性添加所有节点
+          addBatchSize = remainingCount;
         } else {
-          // 中等系列：每批20-30个
-          addBatchSize = Math.max(20, Math.floor(remainingCount / 30));
+          // 中等系列：每批500-1000个
+          addBatchSize = Math.max(500, Math.floor(remainingCount / 20));
         }
         
-        // 异步批量添加节点并更新进度
+        // 批量添加节点并更新进度
         for (let batchStart = currentCount; batchStart < nodesToProcess.length; batchStart += addBatchSize) {
           const batchEnd = Math.min(batchStart + addBatchSize, nodesToProcess.length);
           
@@ -442,7 +421,7 @@ const actions = {
           const currentProgress = batchEnd;
           commit('SET_SERIES_PROGRESS_LOADED', currentProgress);
           
-          // 使用 requestAnimationFrame 让出事件循环，性能更好
+          // 只在每批结束后让出事件循环，减少延迟
           // eslint-disable-next-line no-await-in-loop
           await scheduleNext();
         }
@@ -518,10 +497,7 @@ const actions = {
               await new Promise((resolve) => requestAnimationFrame(resolve));
             }
           } catch (error) {
-            // 解析失败时记录但继续
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(`系列 ${i} 完整标签解析失败:`, error);
-            }
+            // 解析失败时静默处理，继续下一个系列
           }
         }
       }

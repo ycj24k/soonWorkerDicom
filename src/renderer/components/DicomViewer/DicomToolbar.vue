@@ -317,7 +317,8 @@
 
     <!-- 测量工具 -->
     <div class="flex_box flex_col_top action_items">
-      <div class="action_item">
+      <!-- 选择模块已隐藏 -->
+      <div class="action_item" v-if="false">
         <div class="flex_box flex_col_top action_btns">
           <div 
             @click="$emit('clear-measurements')" 

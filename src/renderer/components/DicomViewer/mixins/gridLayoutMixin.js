@@ -189,8 +189,6 @@ export default {
           }
 
           if (!viewport) {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] 未找到视口，忽略滚轮事件');
             return;
           }
 
@@ -202,15 +200,11 @@ export default {
           const tools = this.$cornerstoneTools;
           const cornerstone = this.$cornerstone;
           if (!tools || !cornerstone) {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] Cornerstone 工具或核心未初始化');
             return;
           }
 
           const stackState = tools.getToolState(viewport, 'stack');
           if (!stackState || !stackState.data || stackState.data.length === 0) {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] 视口没有 stack state');
             return;
           }
 
@@ -228,12 +222,6 @@ export default {
             if (currentSeries && Array.isArray(currentSeries.children)) {
               const childrenLength = currentSeries.children.length;
               if (childrenLength > imageIds.length) {
-                // eslint-disable-next-line no-console
-                console.log('[gridLayoutMixin][wheel] 检测到 stack 不完整，自动更新', {
-                  stackImageIdsLength: imageIds.length,
-                  seriesChildrenLength: childrenLength,
-                  seriesIndex
-                });
                 // 重新构建 imageIds
                 const { buildImageId } = require('../../../utils/DicomUtils');
                 const newImageIds = currentSeries.children
@@ -251,29 +239,13 @@ export default {
                   // 更新 tool state
                   tools.addToolState(viewport, 'stack', stack);
                   imageIds = newImageIds;
-                  // eslint-disable-next-line no-console
-                  console.log('[gridLayoutMixin][wheel] stack 已更新', {
-                    oldLength,
-                    newLength: newImageIds.length,
-                    currentIndex: stack.currentImageIdIndex
-                  });
                 }
               }
             }
           }
 
-          // eslint-disable-next-line no-console
-          console.log('[gridLayoutMixin][wheel] 检查 stack 状态', {
-            imageIdsLength: imageIds.length,
-            currentIndex,
-            deltaY: e.deltaY
-          });
 
           if (imageIds.length <= 1) {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] 只有一张图，无法切换', {
-              imageIdsLength: imageIds.length
-            });
             return; // 只有一张图时滚轮无意义
           }
 
@@ -287,24 +259,11 @@ export default {
           if (newIndex < 0) newIndex = 0;
           if (newIndex >= imageIds.length) newIndex = imageIds.length - 1;
           if (newIndex === currentIndex) {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] 索引未变化，跳过切换', {
-              currentIndex,
-              newIndex,
-              total: imageIds.length
-            });
             return;
           }
 
           // 优先使用 cornerstoneTools 自带的 stack 滚动方法（更稳定）
           if (typeof tools.stackScroll === 'function') {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] 使用 cornerstoneTools.stackScroll 切换图像', {
-              currentIndex,
-              newIndex,
-              step,
-              total: imageIds.length
-            });
             tools.stackScroll(viewport, step);
             return;
           }
@@ -312,43 +271,23 @@ export default {
           // 兜底方案：手动切换当前索引并加载新图像
           const imageId = imageIds[newIndex];
           if (!imageId) {
-            // eslint-disable-next-line no-console
-            console.log('[gridLayoutMixin][wheel] 目标 imageId 不存在', {
-              newIndex,
-              total: imageIds.length
-            });
             return;
           }
 
           stack.currentImageIdIndex = newIndex;
 
-          // eslint-disable-next-line no-console
-          console.log('[gridLayoutMixin][wheel] 手动切换图像', {
-            currentIndex,
-            newIndex,
-            total: imageIds.length,
-            imageId: imageId.substring(0, 50) + '...'
-          });
 
           cornerstone.loadImage(imageId).then(image => {
             try {
               cornerstone.displayImage(viewport, image);
-              // eslint-disable-next-line no-console
-              console.log('[gridLayoutMixin][wheel] 图像切换成功', {
-                newIndex,
-                total: imageIds.length
-              });
             } catch (err) {
-              // eslint-disable-next-line no-console
-              console.error('[gridLayoutMixin][wheel] 显示图像失败', err);
+              // 显示失败，静默处理
             }
           }).catch((err) => {
-            // eslint-disable-next-line no-console
-            console.error('[gridLayoutMixin][wheel] 加载图像失败', err);
+            // 加载失败，静默处理
           });
         } catch (error) {
-          // eslint-disable-next-line no-console
-          console.error('[gridLayoutMixin][wheel] 滚轮切换异常', error);
+          // 滚轮切换异常，静默处理
         }
       };
 
@@ -450,6 +389,9 @@ export default {
             
             // 为每个视口注册所有可能用到的工具（不激活）
             const tools = this.$cornerstoneTools;
+            // 临时禁用警告，避免重复添加工具的警告
+            const originalWarn = console.warn;
+            console.warn = function() {}; // 临时禁用警告
             try {
               tools.addToolForElement(viewport, tools.WwwcTool);
               tools.addToolForElement(viewport, tools.PanTool);
@@ -467,6 +409,8 @@ export default {
               }
             } catch (error) {
               // 为网格视口注册工具失败，静默处理
+            } finally {
+              console.warn = originalWarn; // 恢复警告
             }
             
             // 不在这里单独绑定事件，使用容器级别的事件委托（在 applyGridStyles 中已设置）
@@ -484,27 +428,11 @@ export default {
         if (currentSeries && currentSeries.children && currentSeries.children.length > 0 && totalSlots > 0) {
           try {
             if (typeof this.loadSeriesToGridViewport === 'function') {
-              console.log('[gridLayoutMixin][loadMultipleSeriesToGrid] 初始化当前系列到第一个视口', {
-                activeSeriesIndex,
-                childrenLength: currentSeries.children.length,
-                totalSlots
-              });
               await this.loadSeriesToGridViewport(activeSeriesIndex, 0);
-            } else {
-              console.warn('[gridLayoutMixin][loadMultipleSeriesToGrid] loadSeriesToGridViewport 不存在，无法初始化当前系列', {
-                hasLoader: typeof this.loadSeriesToGridViewport === 'function'
-              });
             }
           } catch (error) {
-            console.error('[gridLayoutMixin][loadMultipleSeriesToGrid] 初始化当前系列到网格视口失败', error);
+            // 初始化失败，静默处理
           }
-        } else {
-          console.log('[gridLayoutMixin][loadMultipleSeriesToGrid] 跳过初始化当前系列到视口', {
-            hasSeries: !!currentSeries,
-            hasChildren: currentSeries && Array.isArray(currentSeries.children),
-            childrenLength: currentSeries && Array.isArray(currentSeries.children) ? currentSeries.children.length : 0,
-            totalSlots
-          });
         }
 
         // 默认选择第一个视口
@@ -513,7 +441,6 @@ export default {
         }
       } catch (error) {
         // 加载失败，忽略
-        console.error('初始化网格视图失败:', error);
       }
     },
 
@@ -640,7 +567,8 @@ export default {
         // 忽略错误，使用默认值
       }
       const imageNo = currentImageIndex + 1;
-      const totalImages = series.children.length;
+      // 视口上方只显示当前帧数，不显示总帧数
+      const imageNoDisplay = `${imageNo}`;
       
       // 创建方向指示数据
       const xData = Array.from({ length: 33 }, (_, i) => i);
@@ -664,7 +592,7 @@ export default {
           <div class="top_info_item">${institution}</div>
           <div class="top_info_item">${studyDesc}</div>
           <div class="top_info_item">Series No : ${seriesNo}</div>
-          <div class="top_info_item image-no-item">Image No : ${imageNo}</div>
+          <div class="top_info_item image-no-item">Image No : ${imageNoDisplay}</div>
           <div class="top_info_item">Acq Time : ${acqTime}</div>
         </div>
 
@@ -758,6 +686,8 @@ export default {
           // 忽略错误
         }
         const imageNo = currentImageIndex + 1;
+        // 视口上方只显示当前帧数，不显示总帧数
+        const imageNoDisplay = `${imageNo}`;
         
         // 更新缩放级别
         const zoomElement = overlay.querySelector('.zoom-level-item');
@@ -775,10 +705,10 @@ export default {
           windowCenterElement.textContent = windowCenter;
         }
         
-        // 更新图像编号
+        // 更新图像编号（显示帧数）
         const imageNoElement = overlay.querySelector('.image-no-item');
         if (imageNoElement) {
-          imageNoElement.textContent = `Image No : ${imageNo}`;
+          imageNoElement.textContent = `Image No : ${imageNoDisplay}`;
         }
       } catch (error) {
         // 忽略错误
