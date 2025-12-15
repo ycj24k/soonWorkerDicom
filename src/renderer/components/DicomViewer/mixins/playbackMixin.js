@@ -39,12 +39,23 @@ export default {
      */
     getCurrentImageFileIndex() {
       const currentSeries = this.$store.getters['dicom/currentSeries'];
-      if (!currentSeries || !currentSeries.children || currentSeries.children.length === 0) {
+      if (!currentSeries) {
+        return { imageFiles: [], currentImageFileIndex: -1 };
+      }
+
+      // 优先使用 _allImageNodes 获取所有影像文件（总数），如果没有则使用 children
+      // 这样可以正确处理后台加载的情况（初始化时 children 可能只有第一个影像）
+      let sourceNodes = [];
+      if (currentSeries._allImageNodes && Array.isArray(currentSeries._allImageNodes) && currentSeries._allImageNodes.length > 0) {
+        sourceNodes = currentSeries._allImageNodes;
+      } else if (currentSeries.children && Array.isArray(currentSeries.children) && currentSeries.children.length > 0) {
+        sourceNodes = currentSeries.children;
+      } else {
         return { imageFiles: [], currentImageFileIndex: -1 };
       }
 
       // 获取所有影像文件（不是帧）
-      const imageFiles = currentSeries.children.filter(child => {
+      const imageFiles = sourceNodes.filter(child => {
         return child.isFile && !child.isFrame;
       });
 
@@ -53,7 +64,14 @@ export default {
       }
 
       const currentIndex = this.$store.state.dicom.activeImageIndex || 0;
-      const currentImageNode = currentSeries.children[currentIndex];
+      // 优先从 children 获取当前节点（因为 activeImageIndex 对应的是 children 的索引）
+      // 如果没有，尝试从 _allImageNodes 获取
+      let currentImageNode = null;
+      if (currentSeries.children && currentSeries.children[currentIndex]) {
+        currentImageNode = currentSeries.children[currentIndex];
+      } else if (currentSeries._allImageNodes && currentSeries._allImageNodes[currentIndex]) {
+        currentImageNode = currentSeries._allImageNodes[currentIndex];
+      }
       
       let currentImageFileIndex = -1;
       const getCurrentPath = (node) => {
@@ -96,7 +114,12 @@ export default {
       if (currentImageFileIndex === -1) {
         // 先向前查找
         for (let i = currentIndex - 1; i >= 0; i--) {
-          const node = currentSeries.children[i];
+          let node = null;
+          if (currentSeries.children && currentSeries.children[i]) {
+            node = currentSeries.children[i];
+          } else if (currentSeries._allImageNodes && currentSeries._allImageNodes[i]) {
+            node = currentSeries._allImageNodes[i];
+          }
           if (node && node.isFile && !node.isFrame) {
             const nodePath = getCurrentPath(node);
             if (nodePath) {
@@ -111,8 +134,17 @@ export default {
         }
         // 如果还是找不到，向后查找
         if (currentImageFileIndex === -1) {
-          for (let i = currentIndex + 1; i < currentSeries.children.length; i++) {
-            const node = currentSeries.children[i];
+          const maxLength = Math.max(
+            (currentSeries.children ? currentSeries.children.length : 0),
+            (currentSeries._allImageNodes ? currentSeries._allImageNodes.length : 0)
+          );
+          for (let i = currentIndex + 1; i < maxLength; i++) {
+            let node = null;
+            if (currentSeries.children && currentSeries.children[i]) {
+              node = currentSeries.children[i];
+            } else if (currentSeries._allImageNodes && currentSeries._allImageNodes[i]) {
+              node = currentSeries._allImageNodes[i];
+            }
             if (node && node.isFile && !node.isFrame) {
               const nodePath = getCurrentPath(node);
               if (nodePath) {
@@ -287,8 +319,9 @@ export default {
         // 确保图像加载器已注册
         await this.$cornerstoneService.ensureImageLoaderRegistered();
         
-        // 构建图像ID
-        const imageId = `wadouri:${currentCineImagePath}`;
+        // 构建图像ID（统一使用 file:// 前缀，避免在开发模式下被当作 http://localhost:9080 路径）
+        const imageNode = { fullPath: currentCineImagePath, path: currentCineImagePath };
+        const imageId = buildImageId(imageNode);
         
         // 设置播放参数
         const playbackOptions = {
@@ -456,17 +489,37 @@ export default {
           return;
         }
 
+        // 统一使用网格视口系统（1x1网格）
+        // 确保网格视图已激活
+        if (!this.isGridViewActive) {
+          const layout = { rows: 1, cols: 1, totalSlots: 1 };
+          await this.$store.dispatch('viewer/activateGridLayout', layout);
+          if (typeof this.initializeGridView === 'function') {
+            await this.initializeGridView();
+          }
+        }
+        
+        // 获取当前活动的视口元素
         let element = null;
         try {
           if (typeof this.getActiveElement === 'function') {
             element = this.getActiveElement();
           }
         } catch (error) {
-          // getActiveElement 调用失败，使用默认元素
+          // getActiveElement 调用失败
         }
         
         if (!element) {
-          element = this.$refs.dicomViewer;
+          // 如果获取失败，尝试从视口列表获取
+          if (typeof this.getGridViewportElements === 'function') {
+            const viewports = this.getGridViewportElements();
+            const selectedIndex = this.$store.state.viewer.gridViewState?.selectedViewportIndex || 0;
+            if (viewports[selectedIndex]) {
+              element = viewports[selectedIndex];
+            } else if (viewports.length > 0) {
+              element = viewports[0];
+            }
+          }
         }
         
         if (!element) {
@@ -476,6 +529,7 @@ export default {
 
         await this.$cornerstoneService.ensureImageLoaderRegistered();
         
+        // 确保视口已启用 Cornerstone（在网格视口中，视口应该已经启用）
         const cornerstone = this.$cornerstone;
         if (cornerstone) {
           try {
@@ -673,10 +727,17 @@ export default {
      * 上一张影像
      * 普通影像：跳转到上一个影像
      * 动态影像：跳转到上一个影像的第一帧（frame=0）
+     * 注意：不管播放状态还是非播放状态都应该有效
      */
     async previousImage() {
       try {
-        this.cleanupPlayback();
+        // 如果正在播放，先暂停（不清理，只是暂停）
+        const isPlaying = this.$store.getters['viewer/isPlaying'];
+        const isPaused = this.$store.getters['viewer/isPaused'];
+        if (isPlaying && !isPaused) {
+          this.pausePlayback();
+        }
+        
         const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
         // 检查是否有效：必须有图像文件，且当前索引有效且大于0
         if (imageFiles.length === 0 || currentImageFileIndex < 0 || currentImageFileIndex === 0) {
@@ -694,7 +755,6 @@ export default {
         await this.$nextTick();
         this.$forceUpdate();
       } catch (error) {
-        console.error('上一张影像失败:', error);
         errorHandler.handleError(error, 'previousImage');
       }
     },
@@ -703,10 +763,17 @@ export default {
      * 下一张影像
      * 普通影像：跳转到下一个影像
      * 动态影像：跳转到下一个影像的第一帧（frame=0）
+     * 注意：不管播放状态还是非播放状态都应该有效
      */
     async nextImage() {
       try {
-        this.cleanupPlayback();
+        // 如果正在播放，先暂停（不清理，只是暂停）
+        const isPlaying = this.$store.getters['viewer/isPlaying'];
+        const isPaused = this.$store.getters['viewer/isPaused'];
+        if (isPlaying && !isPaused) {
+          this.pausePlayback();
+        }
+        
         const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
         if (imageFiles.length === 0 || currentImageFileIndex < 0 || currentImageFileIndex >= imageFiles.length - 1) {
           return;
@@ -723,7 +790,6 @@ export default {
         await this.$nextTick();
         this.$forceUpdate();
       } catch (error) {
-        console.error('下一张影像失败:', error);
         errorHandler.handleError(error, 'nextImage');
       }
     },

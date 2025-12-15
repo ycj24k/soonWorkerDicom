@@ -3,7 +3,7 @@
  * 处理DICOM图像的加载和选择逻辑
  */
 
-import { errorHandler, gridViewService } from '../../../services';
+import { errorHandler, gridViewService, dicomService } from '../../../services';
 import { findDicomFiles, buildImageId, validateDicomFile } from '../../../utils/DicomUtils';
 const { ConfigManager } = require('../../../utils/ConfigManager');
 const { dialog } = require('@electron/remote');
@@ -197,38 +197,91 @@ export default {
      */
     async selectSeries(index) {
       try {
-        // 清理之前的播放状态
         this.cleanupPlayback();
-
         await this.selectDicomSeries(index);
         
-        if (this.isGridViewActive) {
-          // 在网格模式下，先检查该系列是否已经在某个视口中
-          const viewports = typeof this.getGridViewportElements === 'function'
-            ? this.getGridViewportElements()
-            : [];
-          let foundViewportIndex = -1;
-          
-          for (let i = 0; i < viewports.length; i++) {
-            const viewportSeriesIndex = viewports[i].dataset.seriesIndex;
-            if (
-              viewportSeriesIndex !== undefined &&
-              parseInt(viewportSeriesIndex, 10) === index
-            ) {
-              foundViewportIndex = i;
-              break;
+        if (!this.isGridViewActive) {
+          const layout = { rows: 1, cols: 1, totalSlots: 1 };
+          await this.$store.dispatch('viewer/activateGridLayout', layout);
+          if (typeof this.initializeGridView === 'function') {
+            await this.initializeGridView();
+          }
+        }
+        
+        const viewports = typeof this.getGridViewportElements === 'function'
+          ? this.getGridViewportElements()
+          : [];
+        
+        if (viewports.length === 0) {
+          const element = this.$refs.dicomViewer;
+          if (element) {
+            if (typeof this.applyGridStyles === 'function') {
+              await this.applyGridStyles(element, { rows: 1, cols: 1, totalSlots: 1 });
+            }
+            await this.$nextTick();
+            await this.$nextTick();
+            
+            const newViewports = typeof this.getGridViewportElements === 'function'
+              ? this.getGridViewportElements()
+              : [];
+            
+            if (newViewports.length > 0) {
+              for (let i = 0; i < newViewports.length; i++) {
+                const viewport = newViewports[i];
+                if (viewport) {
+                  this.$cornerstone.enable(viewport);
+                  this.$cornerstoneTools.addStackStateManager(viewport, ['stack']);
+                  
+                  const tools = this.$cornerstoneTools;
+                  const originalWarn = console.warn;
+                  console.warn = function() {};
+                  try {
+                    tools.addToolForElement(viewport, tools.WwwcTool);
+                    tools.addToolForElement(viewport, tools.PanTool);
+                    tools.addToolForElement(viewport, tools.ZoomTool);
+                    tools.addToolForElement(viewport, tools.LengthTool);
+                    tools.addToolForElement(viewport, tools.AngleTool);
+                    tools.addToolForElement(viewport, tools.ProbeTool);
+                    tools.addToolForElement(viewport, tools.RectangleRoiTool);
+                    if (tools.StackScrollMouseWheelTool) {
+                      tools.addToolForElement(viewport, tools.StackScrollMouseWheelTool);
+                      tools.setToolActiveForElement(viewport, 'StackScrollMouseWheel', {});
+                    }
+                  } catch (error) {
+                    // 工具添加失败，静默处理
+                  } finally {
+                    console.warn = originalWarn;
+                  }
+                }
+              }
+              await this.$nextTick();
             }
           }
-          
-          if (foundViewportIndex >= 0) {
-            this.selectGridViewport(foundViewportIndex);
-          } else {
-            const selectedViewportIndex = this.$store.state.viewer.gridViewState.selectedViewportIndex;
-            await this.loadSeriesToGridViewport(index, selectedViewportIndex);
+        }
+        
+        await this.$nextTick();
+        const finalViewports = typeof this.getGridViewportElements === 'function'
+          ? this.getGridViewportElements()
+          : [];
+        
+        if (finalViewports.length === 0) {
+          return;
+        }
+        
+        let foundViewportIndex = -1;
+        for (let i = 0; i < finalViewports.length; i++) {
+          const viewportSeriesIndex = finalViewports[i].dataset.seriesIndex;
+          if (viewportSeriesIndex !== undefined && parseInt(viewportSeriesIndex, 10) === index) {
+            foundViewportIndex = i;
+            break;
           }
+        }
+        
+        if (foundViewportIndex >= 0) {
+          this.selectGridViewport(foundViewportIndex);
         } else {
-          // 在单视图模式下，正常加载
-          await this.loadCurrentImage();
+          const selectedViewportIndex = this.$store.state.viewer.gridViewState?.selectedViewportIndex || 0;
+          await this.loadSeriesToGridViewport(index, selectedViewportIndex);
         }
       } catch (error) {
         errorHandler.handleError(error, 'selectSeries');
@@ -253,14 +306,67 @@ export default {
         const availableSeries = this.$store.state.dicom.dicomSeries;
         series = availableSeries && availableSeries[seriesIndex];
 
+        if (!series) {
+          return;
+        }
+
+        // 检查 children 是否为空
+        if (!series.children || series.children.length === 0) {
+          // 如果 _allImageNodes 存在，说明还在后台加载中，需要先处理第一个影像
+          if (series._allImageNodes && series._allImageNodes.length > 0) {
+            // 同步处理第一个影像节点，确保能立即显示
+            const firstNode = series._allImageNodes[0];
+            if (firstNode && firstNode.isFile && !firstNode.isFrame) {
+              // 检查是否为动态影像
+              const rawPath = firstNode.fullPath || firstNode.path;
+              if (rawPath) {
+                try {
+                  const cineInfo = dicomService.cineService.isCineImage(rawPath);
+                  if (cineInfo && cineInfo.isCine && cineInfo.frameCount > 1) {
+                    // 动态影像：分解为帧节点，只添加第一帧
+                    const frameNodes = dicomService.cineService.extractFramesFromCineImage(firstNode, cineInfo);
+                    if (frameNodes && frameNodes.length > 0) {
+                      // 只添加第一帧到 children
+                      this.$store.commit('dicom/ADD_IMAGES_TO_SERIES_BATCH', {
+                        seriesIndex: seriesIndex,
+                        imageNodes: [frameNodes[0]]
+                      });
+                      // 更新系列信息
+                      const updatedSeries = this.$store.state.dicom.dicomSeries[seriesIndex];
+                      if (updatedSeries && !updatedSeries.cineInfo) {
+                        updatedSeries.cineInfo = cineInfo;
+                        updatedSeries.cineImagePath = rawPath;
+                      }
+                    }
+                  } else {
+                    // 普通影像：直接添加
+                    this.$store.commit('dicom/ADD_IMAGE_TO_SERIES', {
+                      seriesIndex: seriesIndex,
+                      imageNode: firstNode
+                    });
+                  }
+                } catch (error) {
+                  // 处理失败，作为普通文件添加
+                  this.$store.commit('dicom/ADD_IMAGE_TO_SERIES', {
+                    seriesIndex: seriesIndex,
+                    imageNode: firstNode
+                  });
+                }
+              }
+            }
+            // 重新获取系列（可能已经被更新）
+            series = this.$store.state.dicom.dicomSeries[seriesIndex];
+          } else {
+            // 既没有 children 也没有 _allImageNodes，无法加载
+            return;
+          }
+        }
+
         if (!series || !series.children || series.children.length === 0) {
           return;
         }
 
-        // 检查是否为动态影像系列
         const isDynamicSeries = series.cineInfo && series.cineInfo.isCine && series.cineInfo.frameCount > 1;
-
-        // 构建系列的图像ID列表
         let imageIds = series.children.map(img => buildImageId(img)).filter(id => id !== null);
 
         // 关键修复：如果是动态影像系列，检查 imageIds 是否正确构建
@@ -332,7 +438,6 @@ export default {
           ? Math.max(0, Math.min(activeImageIndex, imageIds.length - 1))
           : 0;
         
-        // 如果imageIds为空，说明没有可用的影像
         if (imageIds.length === 0) {
           return;
         }
@@ -357,9 +462,7 @@ export default {
           this.$cornerstoneTools.addToolState(viewport, 'stack', stack);
         }
 
-        // 加载当前索引对应的图像
         const targetImageId = imageIds[currentImageIndex];
-
         let image;
         try {
           image = await this.$cornerstone.loadImage(targetImageId);
@@ -373,17 +476,19 @@ export default {
           preDisplayStackState.data[0].currentImageIdIndex = currentImageIndex;
         }
         
-        // 确保视口已启用（enable 是幂等的，可以安全地多次调用）
         this.$cornerstone.enable(viewport);
-        
-        // 显示图像
         this.$cornerstone.displayImage(viewport, image);
         
-        // 强制刷新视口（确保图像可见）
         await this.$nextTick();
         this.$cornerstone.resize(viewport);
         
-        // 确保窗口级别有效（如果不是有效值，设置默认值）
+        await this.$nextTick();
+        await new Promise(resolve => requestAnimationFrame(() => {
+          this.$cornerstone.resize(viewport);
+          this.$cornerstone.updateImage(viewport);
+          resolve();
+        }));
+        
         const viewportBeforeUpdate = this.$cornerstone.getViewport(viewport);
         if (viewportBeforeUpdate && viewportBeforeUpdate.voi) {
           if (!viewportBeforeUpdate.voi.windowWidth || viewportBeforeUpdate.voi.windowWidth <= 0) {
@@ -416,7 +521,27 @@ export default {
           this.renderImageInfoToOverlay(overlay, viewport);
         }
 
-        // 选中该视口
+        try {
+          const tools = this.$cornerstoneTools;
+          const originalWarn = console.warn;
+          console.warn = function() {};
+          try {
+            tools.addToolForElement(viewport, tools.WwwcTool);
+            tools.addToolForElement(viewport, tools.PanTool);
+            tools.addToolForElement(viewport, tools.ZoomTool);
+            tools.addToolForElement(viewport, tools.LengthTool);
+            tools.addToolForElement(viewport, tools.AngleTool);
+            tools.addToolForElement(viewport, tools.ProbeTool);
+            tools.addToolForElement(viewport, tools.RectangleRoiTool);
+          } catch (e) {
+            // 工具可能已添加过，忽略
+          } finally {
+            console.warn = originalWarn;
+          }
+        } catch (error) {
+          // 添加工具失败，静默处理
+        }
+        
         this.selectGridViewport(viewportIndex);
 
         // 再次确保 stack state 同步（必须在 displayImage 之后更新，确保 currentImageIdIndex 正确）
@@ -427,22 +552,19 @@ export default {
           finalStackState.data[0].imageIds = imageIds;
         }
 
-        // 确保当前视口启用了滚轮堆栈切换工具（StackScrollMouseWheel）
         try {
           const tools = this.$cornerstoneTools;
           if (tools && tools.StackScrollMouseWheelTool) {
-            // 检查工具是否已添加到元素（通过临时禁用console.warn来避免警告）
             const originalWarn = console.warn;
-            console.warn = function() {}; // 临时禁用警告
+            console.warn = function() {};
             try {
               tools.addToolForElement(viewport, tools.StackScrollMouseWheelTool);
             } catch (e) {
               // 可能已经添加过，静默处理
             } finally {
-              console.warn = originalWarn; // 恢复警告
+              console.warn = originalWarn;
             }
             try {
-              // 针对该视口激活滚轮切换工具（不占用鼠标按钮）
               tools.setToolActiveForElement(viewport, 'StackScrollMouseWheel', {});
             } catch (e) {
               // 激活失败，静默处理
@@ -488,6 +610,25 @@ export default {
         
         // 加载当前图像
         await this.loadCurrentImage();
+
+        // 在首个系列和视口都准备好后，主动刷新一次患者/检查信息覆盖层
+        // 说明：
+        // - 自动加载的第一个系列有时会在 dicomDict 尚未完全就绪时先渲染 overlay，导致信息为空
+        // - 这里在首张影像加载完成后，对当前所有视口重新调用 renderImageInfoToOverlay 以确保信息完整
+        await this.$nextTick();
+        if (typeof this.getGridViewportElements === 'function' && typeof this.renderImageInfoToOverlay === 'function') {
+          const viewports = this.getGridViewportElements() || [];
+          viewports.forEach(viewport => {
+            try {
+              const overlay = viewport.querySelector('.grid-image-info-overlay');
+              if (overlay) {
+                this.renderImageInfoToOverlay(overlay, viewport);
+              }
+            } catch (e) {
+              // 覆盖层刷新失败时静默忽略，避免影响主流程
+            }
+          });
+        }
         
         // 检查是否为动态影像，如果是则显示动态播放选项
         const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
@@ -507,8 +648,8 @@ export default {
         this.$store.commit('dicom/SET_LOADING', false);
         this.localLoading = false;
 
-        // 在首张影像加载完成后，启动后台系列加载进度（按系列顺序逐个完成）
-        this.$store.dispatch('dicom/startBackgroundSeriesLoading');
+        // 在首张影像加载完成后，启动后台系列加载（静默模式，不显示进度）
+        this.$store.dispatch('dicom/startBackgroundSeriesLoading', { silent: true });
       } catch (error) {
         // 发生错误时确保loading状态为false
         this.$store.commit('dicom/SET_LOADING', false);
@@ -518,7 +659,7 @@ export default {
     },
 
     /**
-     * 加载当前图像 - 统一使用网格视口系统
+     * 加载当前图像 - 统一使用视口列表加载（1x1网格）
      */
     async loadCurrentImage() {
       try {
@@ -528,24 +669,15 @@ export default {
           return;
         }
 
-        // 确保图像加载器已注册
-        await this.$cornerstoneService.ensureImageLoaderRegistered();
-        
-        // 使用通用工具函数查找DICOM文件
-        const imageIds = findDicomFiles(currentSeries, validateDicomFile, buildImageId);
-        
-        if (imageIds.length === 0) {
-          return;
-        }
-        
-        // 统一使用网格视口系统
+        // 确保网格视图已激活（统一使用1x1网格）
         if (!this.isGridViewActive) {
-          // 如果网格未激活，先激活1x1网格
           const layout = { rows: 1, cols: 1, totalSlots: 1 };
           await this.$store.dispatch('viewer/activateGridLayout', layout);
-          await this.initializeGridView();
-          // initializeGridView 内部会调用 loadMultipleSeriesToGrid，已经加载了当前系列
-          return;
+          if (typeof this.initializeGridView === 'function') {
+            await this.initializeGridView();
+            // initializeGridView 内部会调用 loadMultipleSeriesToGrid，已经加载了当前系列
+            return;
+          }
         }
         
         // 在网格模式下，加载到第一个视口（索引0）
@@ -553,7 +685,7 @@ export default {
         await this.loadSeriesToGridViewport(activeSeriesIndex, 0);
         
       } catch (error) {
-        // 静默处理错误
+        // 加载失败，静默处理
       }
     }
   }

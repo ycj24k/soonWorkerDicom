@@ -40,7 +40,7 @@
     <!-- 主内容区 -->
     <div class="flex_box content_box">
       <!-- 侧边栏 -->
-      <DicomSidebar @select-series="selectSeries" />
+      <DicomSidebar @select-series="selectSeries" @clear-viewports="handleClearViewports" />
 
       <!-- 图像显示区 -->
       <div 
@@ -64,6 +64,46 @@
 
     <!-- 图像详细信息对话框 -->
     <ImageInfo ref="imageInfo" />
+
+    <!-- 点距校准对话框 -->
+    <el-dialog
+      title="点距调整"
+      :visible.sync="calibrationDialogVisible"
+      width="360px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      append-to-body
+    >
+      <div class="calibration-dialog-body">
+        <div class="calibration-row">
+          <span class="label">线段长度：</span>
+          <el-input
+            class="calibration-input"
+            :value="calibrationMeasuredLength"
+            disabled
+          >
+            <template slot="append">mm</template>
+          </el-input>
+        </div>
+        <div class="calibration-row">
+          <span class="label">真实长度：</span>
+          <el-input
+            class="calibration-input"
+            v-model="calibrationRealLength"
+            placeholder="请输入真实长度"
+          >
+            <template slot="append">mm</template>
+          </el-input>
+        </div>
+        <div class="calibration-hint">
+          请确认该线段的真实物理长度，单位为毫米。
+        </div>
+      </div>
+      <span slot="footer" class="dialog-footer">
+        <el-button size="small" @click="cancelPixelCalibration">取消</el-button>
+        <el-button size="small" type="primary" @click="confirmPixelCalibration">确定</el-button>
+      </span>
+    </el-dialog>
     
     <!-- 加载动画 -->
     <div v-if="loading || localLoading" class="loading-overlay">
@@ -141,7 +181,12 @@ export default {
         { img: require('@/assets/images/action14-2.png'), ww: 400, wc: 50 },
         { img: require('@/assets/images/action14-3.png'), ww: 2000, wc: 500 },
         { img: require('@/assets/images/action14-4.png'), ww: 1500, wc: -600 }
-      ]
+      ],
+      // 点距校准对话框状态
+      calibrationDialogVisible: false,
+      calibrationMeasuredLength: '',
+      calibrationRealLength: '',
+      calibrationPixelDistance: 0
     };
   },
   computed: {
@@ -203,14 +248,12 @@ export default {
       
       const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
       
-      // 如果找不到当前图像索引，或者索引无效，或者已经是第一张，则禁用上一张按钮
-      if (imageFiles.length === 0) {
+      // 如果找不到当前图像索引或索引无效，则禁用
+      if (imageFiles.length === 0 || currentImageFileIndex < 0) {
         return true;
       }
-      if (currentImageFileIndex < 0) {
-        return true;
-      }
-      // 只有当 currentImageFileIndex > 0 时才启用上一张按钮
+      
+      // 只有第一个影像（索引为0）才禁用上一张按钮
       return currentImageFileIndex === 0;
     },
     
@@ -230,13 +273,12 @@ export default {
       
       const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
       
-      if (imageFiles.length === 0) {
+      // 如果找不到当前图像索引或索引无效，则禁用
+      if (imageFiles.length === 0 || currentImageFileIndex < 0) {
         return true;
       }
-      if (currentImageFileIndex < 0) {
-        return true;
-      }
-      // 只有当 currentImageFileIndex >= imageFiles.length - 1 时才禁用下一张按钮
+      
+      // 只有最后一个影像（索引为 imageFiles.length - 1）才禁用下一张按钮
       return currentImageFileIndex >= imageFiles.length - 1;
     },
 
@@ -317,6 +359,43 @@ export default {
         }
       },
       deep: true
+    },
+    // 当 dicom 字典发生变化（尤其是后台完整解析完成）时，主动刷新当前系列视口上的患者/检查信息
+    '$store.state.dicom.dicomDict': {
+      handler(newVal, oldVal) {
+        try {
+          const activeIndex = this.$store.state.dicom.activeSeriesIndex;
+          if (!Array.isArray(newVal) || activeIndex < 0 || activeIndex >= newVal.length) {
+            return;
+          }
+          const newSeriesDict = newVal[activeIndex];
+          const oldSeriesDict = Array.isArray(oldVal) ? oldVal[activeIndex] : null;
+          // 仅在当前系列的字典对象实际发生变化时才刷新，避免不必要的重绘
+          if (!newSeriesDict || newSeriesDict === oldSeriesDict) {
+            return;
+          }
+
+          this.$nextTick(() => {
+            if (typeof this.getGridViewportElements === 'function' &&
+                typeof this.renderImageInfoToOverlay === 'function') {
+              const viewports = this.getGridViewportElements() || [];
+              viewports.forEach(viewport => {
+                try {
+                  const overlay = viewport.querySelector('.grid-image-info-overlay');
+                  if (overlay) {
+                    this.renderImageInfoToOverlay(overlay, viewport);
+                  }
+                } catch (e) {
+                  // 单个视口刷新失败时静默忽略
+                }
+              });
+            }
+          });
+        } catch (e) {
+          // 刷新失败时不影响主流程
+        }
+      },
+      deep: true
     }
   },
   async mounted() {
@@ -370,7 +449,7 @@ export default {
       try {
         ipcRenderer.send('maximize-window');
         
-        // 初始化1x1网格布局（单视图模式）
+        // 初始化1x1网格布局（统一使用网格视口系统）
         const layout = { rows: 1, cols: 1, totalSlots: 1 };
         await this.$store.dispatch('viewer/activateGridLayout', layout);
         await this.initializeGridView();
@@ -418,7 +497,87 @@ export default {
       }
     },
 
+    /**
+     * 处理清空视口事件（从侧边栏触发）
+     */
+    async handleClearViewports() {
+      try {
+        // 清理播放状态
+        this.cleanupPlayback();
 
+        // 统一使用网格视口系统（1x1网格）
+        // 确保网格视图已激活
+        if (!this.isGridViewActive) {
+          const layout = { rows: 1, cols: 1, totalSlots: 1 };
+          await this.$store.dispatch('viewer/activateGridLayout', layout);
+          if (typeof this.initializeGridView === 'function') {
+            await this.initializeGridView();
+          }
+        }
+        
+        // 清空所有视口
+        const viewports = typeof this.getGridViewportElements === 'function'
+          ? this.getGridViewportElements()
+          : [];
+        
+        viewports.forEach(viewport => {
+          try {
+            // 清除信息更新定时器
+            if (viewport._infoUpdateTimer) {
+              clearInterval(viewport._infoUpdateTimer);
+              viewport._infoUpdateTimer = null;
+            }
+            
+            // 清除stack state
+            const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
+            if (stackState && stackState.data) {
+              stackState.data = [];
+            }
+            
+            // 清除系列信息标签
+            const label = viewport.querySelector('.series-info-label');
+            if (label) {
+              label.remove();
+            }
+            
+            // 清除覆盖层
+            const overlay = viewport.querySelector('.grid-image-info-overlay');
+            if (overlay) {
+              overlay.remove();
+            }
+            
+            // 禁用Cornerstone
+            this.$cornerstone.disable(viewport);
+            
+            // 清除dataset
+            delete viewport.dataset.seriesIndex;
+            delete viewport.dataset.imageIndex;
+            
+            // 清除选中状态
+            viewport.classList.remove('selected');
+            viewport.style.outline = '';
+            viewport.style.border = '';
+            viewport.style.boxShadow = '';
+            viewport.style.backgroundColor = '';
+            viewport.style.zIndex = '';
+          } catch (error) {
+            // 清空视口失败，静默处理
+          }
+        });
+
+        // 关键一步：重置网格布局状态
+        // 说明：
+        // - 清空系列列表后，当前网格布局虽然仍处于“激活”状态，但所有视口已经被禁用且无 stack 状态
+        // - 如果不重置，后续通过树形结构新增系列时，selectSeries 会认为网格已激活而跳过初始化逻辑
+        //   导致新系列加载不到视口、工具和滚轮事件也无法正确绑定
+        // - 这里主动将网格布局标记为未激活，确保下次选择系列时重新执行 1x1 网格初始化流程
+        if (this.$store && this.$store.dispatch) {
+          await this.$store.dispatch('viewer/deactivateGridLayout');
+        }
+      } catch (error) {
+        // 清空视口失败，静默处理
+      }
+    },
 
     /**
      * 关闭应用

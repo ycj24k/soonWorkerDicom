@@ -97,6 +97,51 @@ const mutations = {
     state.dicomSeries = series;
   },
 
+  CLEAR_SERIES(state) {
+    state.dicomSeries = [];
+    state.thumbnails = [];
+    state.activeSeriesIndex = 0;
+    state.activeImageIndex = 0;
+    state.currentImageIds = [];
+  },
+
+  ADD_SERIES(state, { thumbnails, dicomDict, filteredSeries }) {
+    // 添加系列到现有列表中（避免重复）
+    if (Array.isArray(filteredSeries) && filteredSeries.length > 0) {
+      // 检查每个系列是否已存在（基于 seriesUID）
+      const existingSeriesUIDs = new Set(
+        state.dicomSeries.map(s => {
+          // 尝试从 children 的第一个文件中获取 seriesUID
+          if (s.children && s.children.length > 0) {
+            const firstChild = s.children[0];
+            return firstChild.seriesUID || firstChild.path;
+          }
+          return s.path || s.name;
+        })
+      );
+
+      filteredSeries.forEach((series, index) => {
+        // 尝试获取 seriesUID
+        let seriesUID = series.path || series.name;
+        if (series.children && series.children.length > 0) {
+          const firstChild = series.children[0];
+          seriesUID = firstChild.seriesUID || firstChild.path || seriesUID;
+        }
+
+        // 如果不存在，添加到列表
+        if (!existingSeriesUIDs.has(seriesUID)) {
+          state.dicomSeries.push(series);
+          if (thumbnails && thumbnails[index]) {
+            state.thumbnails.push(thumbnails[index]);
+          }
+          if (dicomDict && dicomDict[index]) {
+            state.dicomDict.push(dicomDict[index]);
+          }
+        }
+      });
+    }
+  },
+
   ADD_IMAGE_TO_SERIES(state, { seriesIndex, imageNode }) {
     if (state.dicomSeries[seriesIndex] && Array.isArray(state.dicomSeries[seriesIndex].children)) {
       state.dicomSeries[seriesIndex].children.push(imageNode);
@@ -227,8 +272,12 @@ const actions = {
 
   /**
    * 按系列顺序后台加载完整DICOM标签和影像数据
+   * @param {Object} context - Vuex context
+   * @param {Object} options - 选项
+   * @param {boolean} options.silent - 是否静默模式（不显示进度条）
    */
-  async startBackgroundSeriesLoading({ state, commit }) {
+  async startBackgroundSeriesLoading({ state, commit }, options = {}) {
+    const { silent = false } = options;
     const seriesList = state.dicomSeries || [];
     if (!Array.isArray(seriesList) || seriesList.length === 0) {
       commit('RESET_SERIES_PROGRESS');
@@ -314,13 +363,16 @@ const actions = {
       const currentDict = state.dicomDict[i];
       const isFullyParsed = currentDict && currentDict._fullyParsed === true;
 
-      // 切换到新系列时，直接重置为0，立即更新UI，无延迟
-      commit('SET_SERIES_PROGRESS_STATE', {
-        isActive: true,
-        currentSeriesIndex: i,
-        currentLoaded: 0, // 从0开始，重新全部加载
-        currentTotal: total
-      });
+      // 如果不是静默模式，显示进度条
+      if (!silent) {
+        // 切换到新系列时，直接重置为0，立即更新UI，无延迟
+        commit('SET_SERIES_PROGRESS_STATE', {
+          isActive: true,
+          currentSeriesIndex: i,
+          currentLoaded: 0, // 从0开始，重新全部加载
+          currentTotal: total
+        });
+      }
 
       // 第二步：动态加载阶段 - 只添加影像节点，不解析完整标签（加快速度）
       // 完整标签解析将在第三步后台静默加载中完成
@@ -417,43 +469,52 @@ const actions = {
             imageNodes: nodesToAdd
           });
           
-          // 更新进度（基于已添加的节点数）
-          const currentProgress = batchEnd;
-          commit('SET_SERIES_PROGRESS_LOADED', currentProgress);
+          // 如果不是静默模式，更新进度（基于已添加的节点数）
+          if (!silent) {
+            const currentProgress = batchEnd;
+            commit('SET_SERIES_PROGRESS_LOADED', currentProgress);
+          }
           
           // 只在每批结束后让出事件循环，减少延迟
           // eslint-disable-next-line no-await-in-loop
           await scheduleNext();
         }
         
-        // 确保最终进度是100%
-        commit('SET_SERIES_PROGRESS_LOADED', targetCount);
-      } else {
-        // 如果没有_allImageNodes，说明已经是完整加载的系列，快速更新进度
-        // 从0开始批量更新到total
-        const batchSize = total < 50 
-          ? Math.max(5, Math.floor(total / 10))
-          : Math.max(20, Math.floor(total / 30));
-        
-        // 使用 requestAnimationFrame 替代 setTimeout
-        const scheduleNext = () => new Promise((resolve) => requestAnimationFrame(resolve));
-        
-        for (let progress = 0; progress <= total; progress += batchSize) {
-          const currentProgress = Math.min(progress, total);
-          commit('SET_SERIES_PROGRESS_LOADED', currentProgress);
-          
-          // 使用 requestAnimationFrame 让出事件循环
-          // eslint-disable-next-line no-await-in-loop
-          await scheduleNext();
+        // 如果不是静默模式，确保最终进度是100%
+        if (!silent) {
+          commit('SET_SERIES_PROGRESS_LOADED', targetCount);
         }
-        
-        // 确保最终进度是100%
-        commit('SET_SERIES_PROGRESS_LOADED', total);
+      } else {
+        // 如果没有_allImageNodes，说明已经是完整加载的系列
+        // 如果是静默模式，直接跳过进度更新；否则快速更新进度
+        if (!silent) {
+          // 从0开始批量更新到total
+          const batchSize = total < 50 
+            ? Math.max(5, Math.floor(total / 10))
+            : Math.max(20, Math.floor(total / 30));
+          
+          // 使用 requestAnimationFrame 替代 setTimeout
+          const scheduleNext = () => new Promise((resolve) => requestAnimationFrame(resolve));
+          
+          for (let progress = 0; progress <= total; progress += batchSize) {
+            const currentProgress = Math.min(progress, total);
+            commit('SET_SERIES_PROGRESS_LOADED', currentProgress);
+            
+            // 使用 requestAnimationFrame 让出事件循环
+            // eslint-disable-next-line no-await-in-loop
+            await scheduleNext();
+          }
+          
+          // 确保最终进度是100%
+          commit('SET_SERIES_PROGRESS_LOADED', total);
+        }
       }
     }
 
-    // 所有系列完成后隐藏进度条
-    commit('RESET_SERIES_PROGRESS');
+    // 如果不是静默模式，所有系列完成后隐藏进度条
+    if (!silent) {
+      commit('RESET_SERIES_PROGRESS');
+    }
     
     // 第三步：后台静默加载完整标签（不显示进度，不影响用户体验）
     // 使用 requestAnimationFrame 异步执行，不阻塞UI，性能更好
@@ -628,6 +689,260 @@ const actions = {
     if (state.activeImageIndex > 0) {
       commit('SET_ACTIVE_IMAGE', state.activeImageIndex - 1);
     }
+  },
+
+  /**
+   * 清空系列列表
+   */
+  clearSeries({ commit }) {
+    commit('CLEAR_SERIES');
+  },
+
+  /**
+   * 从目录节点加载系列（用于双击系列或点击上级目录）
+   * @param {Object} context - Vuex context
+   * @param {Object} nodeData - 树节点数据
+   */
+  async loadSeriesFromNode({ state, commit, dispatch }, nodeData) {
+    console.log('[loadSeriesFromNode] 开始加载系列', { nodeData: nodeData ? { name: nodeData.name || nodeData.label, path: nodeData.path, hasChildren: !!nodeData.children } : null });
+    try {
+      commit('SET_ERROR', null);
+      
+      if (!nodeData) {
+        console.error('[loadSeriesFromNode] 错误：无效的节点数据');
+        throw new Error('无效的节点数据');
+      }
+
+      // 直接使用 nodeData 作为目标节点（el-tree 的节点数据已经包含了完整信息）
+      // 但需要确保 nodeData 有 path 属性（可能是 data.path 或 nodeData.path）
+      const targetNode = nodeData.data || nodeData;
+      console.log('[loadSeriesFromNode] 目标节点', { 
+        name: targetNode?.name || targetNode?.label, 
+        path: targetNode?.path, 
+        isFile: targetNode?.isFile,
+        childrenCount: targetNode?.children?.length || 0
+      });
+      
+      if (!targetNode || !targetNode.path) {
+        console.error('[loadSeriesFromNode] 错误：节点数据缺少路径信息', { targetNode });
+        throw new Error('节点数据缺少路径信息');
+      }
+
+      // 判断节点类型：如果是目录且有子节点，可能是上级目录；否则可能是系列
+      let seriesNodes = [];
+      
+      if (targetNode.isFile) {
+        console.log('[loadSeriesFromNode] 跳过：文件节点不应该触发加载系列');
+        return;
+      }
+
+      if (!targetNode.children || targetNode.children.length === 0) {
+        console.log('[loadSeriesFromNode] 跳过：空目录');
+        return;
+      }
+
+      // 分析节点结构
+      let structureAnalysis = null;
+      try {
+        console.log('[loadSeriesFromNode] 开始分析节点结构...');
+        structureAnalysis = dicomService.analyzeDicomStructure(targetNode);
+        console.log('[loadSeriesFromNode] 结构分析结果', {
+          hasSeriesNodes: !!(structureAnalysis?.seriesNodes?.length),
+          seriesNodesCount: structureAnalysis?.seriesNodes?.length || 0,
+          hasImageNodes: !!(structureAnalysis?.imageNodes?.length),
+          imageNodesCount: structureAnalysis?.imageNodes?.length || 0
+        });
+      } catch (error) {
+        console.error('[loadSeriesFromNode] 结构分析失败', error);
+        // 分析失败，尝试其他方式
+        errorHandler.handleError(error, 'analyzeDicomStructure in loadSeriesFromNode');
+      }
+      
+      if (structureAnalysis && structureAnalysis.seriesNodes && structureAnalysis.seriesNodes.length > 0) {
+        // 找到系列节点
+        console.log('[loadSeriesFromNode] 使用结构分析得到的系列节点', { count: structureAnalysis.seriesNodes.length });
+        seriesNodes = structureAnalysis.seriesNodes;
+      } else if (targetNode.children && targetNode.children.length > 0) {
+        // 可能是上级目录，尝试分析其子节点
+        // 检查是否有直接的子系列
+        const hasDirectSeries = targetNode.children.some(child => 
+          !child.isFile && child.children && child.children.some(grandchild => 
+            grandchild.isFile || (grandchild.children && grandchild.children.length > 0)
+          )
+        );
+
+        if (hasDirectSeries) {
+          // 尝试将每个子节点作为系列分析
+          for (const child of targetNode.children) {
+            if (!child.isFile) {
+              try {
+                const childAnalysis = dicomService.analyzeDicomStructure(child);
+                if (childAnalysis && childAnalysis.seriesNodes && childAnalysis.seriesNodes.length > 0) {
+                  seriesNodes.push(...childAnalysis.seriesNodes);
+                }
+              } catch (error) {
+                // 子节点分析失败，跳过
+              }
+            }
+          }
+        } else {
+          // 如果没有子系列，尝试将当前节点作为单个系列处理
+          let allImageNodes = [];
+          
+          if (structureAnalysis && structureAnalysis.imageNodes && structureAnalysis.imageNodes.length > 0) {
+            // 如果有图像节点但没有系列，使用结构分析得到的 imageNodes
+            allImageNodes = structureAnalysis.imageNodes;
+          } else {
+            // 如果 structureAnalysis 为 null，尝试直接检查 children 是否是图像文件
+            allImageNodes = targetNode.children.filter(child => child.isFile);
+          }
+          
+          if (allImageNodes.length > 0) {
+            console.log('[loadSeriesFromNode] 手动创建系列节点', { allImageNodesCount: allImageNodes.length });
+            // 找到第一个有效的影像文件节点（排除帧节点）
+            const firstImageNode = allImageNodes.find(node => node.isFile && !node.isFrame);
+            if (!firstImageNode) {
+              console.warn('[loadSeriesFromNode] 未找到有效的文件节点，尝试使用第一个节点');
+              // 如果没有找到有效的文件节点，尝试使用第一个节点
+              const fallbackNode = allImageNodes[0];
+              if (!fallbackNode) {
+                console.error('[loadSeriesFromNode] 完全没有节点，无法创建系列');
+                return; // 完全没有节点，无法创建系列
+              }
+              // 使用第一个节点（即使可能是帧节点）
+              seriesNodes = [{
+                name: targetNode.name || targetNode.label || '默认系列',
+                path: targetNode.path,
+                children: [fallbackNode],
+                _allImageNodes: allImageNodes,
+                _totalImageCount: allImageNodes.length,
+                imageCount: allImageNodes.length,
+                isFile: false
+              }];
+              console.log('[loadSeriesFromNode] 使用备用节点创建系列', { seriesNode: seriesNodes[0] });
+            } else {
+              // 创建系列节点，模拟 groupSeriesByDicomTags 的结构
+              // 关键：只保留第一个影像在 children，其他保存在 _allImageNodes 供后台加载使用
+              seriesNodes = [{
+                name: targetNode.name || targetNode.label || '默认系列',
+                path: targetNode.path,
+                children: [firstImageNode],  // 只保留第一个影像文件节点
+                _allImageNodes: allImageNodes,  // 保存所有影像节点
+                _totalImageCount: allImageNodes.length,  // 记录总数
+                imageCount: allImageNodes.length,  // 用于显示总数
+                isFile: false
+                // 注意：不设置 processedForFrames，让后续的 processCineImagesInSeries 处理
+              }];
+              console.log('[loadSeriesFromNode] 创建系列节点', { 
+                name: seriesNodes[0].name,
+                childrenCount: seriesNodes[0].children.length,
+                _allImageNodesCount: seriesNodes[0]._allImageNodes.length,
+                _totalImageCount: seriesNodes[0]._totalImageCount
+              });
+            }
+          }
+        }
+      }
+
+      if (seriesNodes.length === 0) {
+        console.warn('[loadSeriesFromNode] 没有找到系列节点，静默返回');
+        // 不抛出错误，静默返回（可能是非DICOM目录）
+        return;
+      }
+
+      console.log('[loadSeriesFromNode] 处理动态影像', { seriesNodesCount: seriesNodes.length });
+      // 注意：analyzeDicomStructure 已经调用了 processCineImagesInSeries（第102行）
+      // 所以如果 seriesNodes 来自 structureAnalysis.seriesNodes，它们已经处理过了
+      // 只有手动创建的节点（没有 processedForFrames 标记）才需要处理
+      const processedSeriesNodes = seriesNodes.map((series, index) => {
+        // 如果已经处理过，直接返回（避免重复处理）
+        if (series.processedForFrames === true) {
+          console.log(`[loadSeriesFromNode] 系列 ${index} 已处理过，跳过`);
+          return series;
+        }
+        console.log(`[loadSeriesFromNode] 处理系列 ${index} 的动态影像`, { 
+          name: series.name,
+          childrenCount: series.children?.length 
+        });
+        // 手动创建的节点需要处理动态影像
+        const processed = dicomService.cineService.processCineImagesInSeries(series);
+        console.log(`[loadSeriesFromNode] 系列 ${index} 处理完成`, {
+          processedForFrames: processed.processedForFrames,
+          hasCineInfo: !!processed.cineInfo,
+          childrenCount: processed.children?.length
+        });
+        return processed;
+      });
+
+      // 检测动态影像（基于处理后的节点）
+      console.log('[loadSeriesFromNode] 检测动态影像');
+      const dynamicResult = dicomService.isDynamicImageSeries(processedSeriesNodes);
+      if (dynamicResult && dynamicResult.isDynamic) {
+        commit('SET_IS_DYNAMIC_SERIES', true);
+        commit('SET_CINE_INFO', dynamicResult.cineInfo);
+        commit('SET_CURRENT_CINE_IMAGE_PATH', dynamicResult.imagePath);
+      } else {
+        commit('SET_IS_DYNAMIC_SERIES', false);
+        commit('SET_CINE_INFO', null);
+        commit('SET_CURRENT_CINE_IMAGE_PATH', null);
+      }
+
+      // 生成缩略图并过滤无效系列（快速模式）- 使用处理后的系列节点
+      console.log('[loadSeriesFromNode] 开始生成缩略图', { processedSeriesNodesCount: processedSeriesNodes.length });
+      const { thumbnails, dicomDict, filteredSeries } = await dicomService.generateThumbnailList(processedSeriesNodes, false);
+      console.log('[loadSeriesFromNode] 缩略图生成完成', {
+        thumbnailsCount: thumbnails?.length || 0,
+        dicomDictCount: dicomDict?.length || 0,
+        filteredSeriesCount: filteredSeries?.length || 0
+      });
+
+      if (!filteredSeries || filteredSeries.length === 0) {
+        console.warn('[loadSeriesFromNode] 没有有效的系列，静默返回');
+        // 没有有效的系列，静默返回（可能是无效的DICOM目录）
+        return;
+      }
+
+      // 记录添加前的系列数量
+      const seriesCountBefore = state.dicomSeries.length;
+      console.log('[loadSeriesFromNode] 添加系列前', { seriesCountBefore });
+      
+      // 添加到现有系列列表（避免重复）
+      commit('ADD_SERIES', { thumbnails, dicomDict, filteredSeries });
+      
+      // 获取新添加的系列数量
+      const seriesCountAfter = state.dicomSeries.length;
+      const newSeriesCount = seriesCountAfter - seriesCountBefore;
+      console.log('[loadSeriesFromNode] 添加系列后', { 
+        seriesCountAfter, 
+        newSeriesCount,
+        firstNewSeriesIndex: seriesCountBefore
+      });
+      
+      // 启动后台加载（静默模式，不显示进度，因为数据已缓存）
+      console.log('[loadSeriesFromNode] 启动后台加载');
+      dispatch('startBackgroundSeriesLoading', { silent: true });
+      
+      // 如果有新系列添加，自动选中第一个新系列并返回索引
+      if (newSeriesCount > 0) {
+        const firstNewSeriesIndex = seriesCountBefore;
+        commit('SET_ACTIVE_SERIES', firstNewSeriesIndex);
+        console.log('[loadSeriesFromNode] 设置活动系列', { firstNewSeriesIndex });
+        
+        // 返回新系列索引，供组件加载影像使用
+        const result = { newSeriesIndex: firstNewSeriesIndex };
+        console.log('[loadSeriesFromNode] 完成，返回结果', result);
+        return result;
+      }
+      
+      console.log('[loadSeriesFromNode] 完成，但没有新系列添加');
+      return null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '加载系列失败';
+      console.error('[loadSeriesFromNode] 发生错误', { error, errorMessage, stack: error.stack });
+      commit('SET_ERROR', errorMessage);
+      errorHandler.handleError(error, 'loadSeriesFromNode');
+      return null;
+    }
   }
 };
 
@@ -662,8 +977,12 @@ const getters = {
                              (node.name.match(/^IMG\d+$/) && node.path.includes('SER'));
           
           if (isDicomFile) {
-            const imageId = `wadouri:${node.path}`;
+            // 统一使用构建函数生成本地文件 URI（wadouri:file://...）
+            const { buildImageId } = require('../../utils/DicomUtils');
+            const imageId = buildImageId({ fullPath: node.path, path: node.path });
+            if (imageId) {
             imageIds.push(imageId);
+            }
           }
         } else if (node.children) {
           node.children.forEach(child => findDicomFiles(child));

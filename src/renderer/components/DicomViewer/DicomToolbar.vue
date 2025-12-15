@@ -233,7 +233,7 @@
         </div>
       </div>
 
-      <div class="action_item">
+      <!-- <div class="action_item">
         <div class="flex_box flex_col_top action_btns">
           <div 
             @click="$emit('activate-tool', { toolName: 'Crosshairs', actionId: 15 })" 
@@ -248,7 +248,7 @@
         <div class="flex_box flex_row_center action_b">
           <div class="action_name action_name1">定位线</div>
         </div>
-      </div>
+      </div> -->
 
       <div class="action_item playback-item">
         <div class="flex_box flex_col_top action_btns">

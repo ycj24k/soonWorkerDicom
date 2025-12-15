@@ -108,10 +108,19 @@ export default {
     async initializeGridView() {
       try {
         const element = this.$refs.dicomViewer;
-        const layout = this.$store.state.viewer.gridViewState.layout;
+        if (!element) {
+          return;
+        }
         
-        // 应用网格样式
-        this.applyGridStyles(element, layout);
+        const layout = this.$store.state.viewer.gridViewState.layout;
+        await this.applyGridStyles(element, layout);
+        await this.$nextTick();
+        
+        const viewports = this.getGridViewportElements();
+        if (viewports.length === 0) {
+          this.createGridViewports(layout.rows, layout.cols);
+          await this.$nextTick();
+        }
         
         // 加载多个系列到网格中
         await this.loadMultipleSeriesToGrid(layout);
@@ -123,7 +132,7 @@ export default {
     /**
      * 应用网格样式
      */
-    applyGridStyles(element, layout) {
+    async applyGridStyles(element, layout) {
       const { rows, cols } = layout;
       
       // 设置网格容器样式（行列由布局决定，其余由全局CSS控制）
@@ -132,6 +141,9 @@ export default {
       
       // 创建网格视口
       this.createGridViewports(rows, cols);
+      
+      // 等待 DOM 更新完成
+      await this.$nextTick();
       
       // 为容器添加事件委托（处理所有视口的点击）
       this.setupGridViewportEvents(element);
@@ -519,20 +531,68 @@ export default {
         const element = dicomDict.find(item => item.tag === tag);
         return element ? element.value : '';
       };
+
+      // 格式化 DICOM 日期：YYYYMMDD -> YYYY/MM/DD
+      const formatDicomDate = (value) => {
+        if (!value || typeof value !== 'string') {
+          return value || '';
+        }
+        const trimmed = value.trim();
+        // 已经包含分隔符时直接返回
+        if (/[\/\-\.]/.test(trimmed)) {
+          return trimmed;
+        }
+        const digits = trimmed.replace(/[^\d]/g, '');
+        if (digits.length === 8) {
+          const y = digits.slice(0, 4);
+          const m = digits.slice(4, 6);
+          const d = digits.slice(6, 8);
+          return `${y}/${m}/${d}`;
+        }
+        return trimmed;
+      };
+
+      // 格式化 DICOM 时间：HHMMSS(.ffff) -> HH:MM:SS[.ffff]
+      const formatDicomTime = (value) => {
+        if (!value || typeof value !== 'string') {
+          return value || '';
+        }
+        const trimmed = value.trim();
+        // 已经包含冒号时认为已格式化
+        if (/:/.test(trimmed)) {
+          return trimmed;
+        }
+        // 保留原始小数部分：将前6位作为 HHMMSS，剩余部分（包括小数点）原样附加
+        const main = trimmed.replace(/[^\d.]/g, '');
+        const fullMatch = main.match(/^(\d{2})(\d{2})(\d{2})(.*)$/);
+        if (fullMatch) {
+          const hh = fullMatch[1];
+          const mm = fullMatch[2];
+          const ss = fullMatch[3];
+          const suffix = fullMatch[4] || ''; // 可能是 .ffff 或更长，原样保留
+          return `${hh}:${mm}:${ss}${suffix}`;
+        }
+        // 只有 HHMM 的情况
+        const mmMatch = main.match(/^(\d{2})(\d{2})$/);
+        if (mmMatch) {
+          return `${mmMatch[1]}:${mmMatch[2]}`;
+        }
+        return trimmed;
+      };
       
       const patientName = getDicomValue('00100010') || '';
       const patientAge = getDicomValue('00101010') || '';
       const patientSex = getDicomValue('00100040') || '';
-      const patientBirthDate = getDicomValue('00100030') || '';
+      const patientBirthDate = formatDicomDate(getDicomValue('00100030') || '');
       const patientID = getDicomValue('00100020') || '';
       const accessionNumber = getDicomValue('00080050') || '';
       
-      const studyDate = getDicomValue('00080020') || '';
-      const studyTime = getDicomValue('00080030') || '';
+      const studyDate = formatDicomDate(getDicomValue('00080020') || '');
+      const studyTime = formatDicomTime(getDicomValue('00080030') || '');
       const institution = getDicomValue('00080080') || '';
       const studyDesc = getDicomValue('00081030') || '';
       const seriesNo = getDicomValue('00200011') || '';
-      const acqTime = getDicomValue('00080032') || '';
+      const acqTime = formatDicomTime(getDicomValue('00080032') || '');
       
       const model = getDicomValue('00081090') || '';
       const stationName = getDicomValue('00081010') || '';
@@ -553,8 +613,58 @@ export default {
         // 忽略错误，使用默认值
       }
       
-      // 获取图像尺寸（从 DICOM 标签）
-      const imageSize = '11cm'; // 默认值，可以从 DICOM 标签获取
+      // 获取图像尺寸（从 DICOM 标签，初始估算），并缓存基础物理宽度，后续在 updateViewportInfo 中结合缩放更新
+      // 默认使用 11cm，保持原项目行为，在无法从 DICOM 获取 Pixel Spacing / Imager Pixel Spacing 时不会出现空白
+      let imageSize = '11cm'; // 显示在右下角的水平视野长度（单位 cm）
+      let baseWidthMm = null; // 图像原始物理宽度（未考虑缩放，单位 mm）
+      try {
+        const colsTag = getDicomValue('00280011'); // Columns
+        const cols = colsTag ? parseInt(colsTag, 10) : null;
+
+        let colSpacing = null;
+
+        // 1) 优先使用 Pixel Spacing (0028,0030)
+        const pixelSpacingTag = getDicomValue('00280030'); // Pixel Spacing: row\col
+        if (pixelSpacingTag) {
+          const parts = String(pixelSpacingTag).split(/\\|,/).map(v => parseFloat(v));
+          if (parts.length >= 2 && !isNaN(parts[1])) {
+            colSpacing = parts[1];
+          } else if (parts.length === 1 && !isNaN(parts[0])) {
+            colSpacing = parts[0];
+          }
+        }
+
+        // 2) 如果 Pixel Spacing 缺失，再尝试使用 Imager Pixel Spacing (0018,1164)
+        if (!colSpacing || !isFinite(colSpacing) || colSpacing <= 0) {
+          const imagerPixelSpacingTag = getDicomValue('00181164'); // Imager Pixel Spacing: row\col
+          if (imagerPixelSpacingTag) {
+            const parts = String(imagerPixelSpacingTag).split(/\\|,/).map(v => parseFloat(v));
+            if (parts.length >= 2 && !isNaN(parts[1])) {
+              colSpacing = parts[1];
+            } else if (parts.length === 1 && !isNaN(parts[0])) {
+              colSpacing = parts[0];
+            }
+          }
+        }
+
+        // 优先使用列方向的 FOV 作为水平标尺
+        if (cols) {
+          // 1) 若系列存在校准后的像素间距，优先使用
+          const calibrated = series && series.calibratedPixelSpacing && series.calibratedPixelSpacing.col;
+          const effectiveSpacing = calibrated && isFinite(calibrated) && calibrated > 0
+            ? calibrated
+            : (colSpacing && isFinite(colSpacing) && colSpacing > 0 ? colSpacing : null);
+
+          if (effectiveSpacing) {
+            baseWidthMm = cols * effectiveSpacing; // 图像原始物理宽度（未考虑缩放）
+            const widthCm = baseWidthMm / 10;
+            // 只显示到 1 位小数，避免抖动太大
+            imageSize = `${widthCm.toFixed(1)}cm`;
+          }
+        }
+      } catch (e) {
+        // 标签缺失或解析失败时保持默认值（11cm），由后续 updateViewportInfo 使用实际图像数据更新（如有）
+      }
       
       // 获取当前图像索引（从 stack state）
       let currentImageIndex = 0;
@@ -570,9 +680,9 @@ export default {
       // 视口上方只显示当前帧数，不显示总帧数
       const imageNoDisplay = `${imageNo}`;
       
-      // 创建方向指示数据
-      const xData = Array.from({ length: 33 }, (_, i) => i);
-      const yData = Array.from({ length: 20 }, (_, i) => i);
+      // 创建方向指示数据（适当增加刻度数量，使标尺更长但仍居中，不与顶部患者信息重叠）
+      const xData = Array.from({ length: 42 }, (_, i) => i);
+      const yData = Array.from({ length: 30 }, (_, i) => i);
       
       // 创建完整的信息显示
       overlay.innerHTML = `
@@ -598,7 +708,7 @@ export default {
 
         <!-- 技术参数 (右下) -->
         <div class="top_info top_info3">
-          <div class="top_info_item">${imageSize}</div>
+          <div class="top_info_item image-size-item">${imageSize}</div>
           <div class="top_info_item zoom-level-item">${zoomLevel}%</div>
           <div class="top_info_item">${model}</div>
           <div class="top_info_item">${stationName}</div>
@@ -629,6 +739,13 @@ export default {
         </div>
       `;
       
+      // 将基础物理宽度缓存到 overlay 上，供 updateViewportInfo 轻量级使用
+      if (baseWidthMm && isFinite(baseWidthMm) && baseWidthMm > 0) {
+        overlay.dataset.baseWidthMm = String(baseWidthMm);
+      } else {
+        delete overlay.dataset.baseWidthMm;
+      }
+      
       // 立即更新一次
       this.updateViewportInfo(overlay, viewport);
       
@@ -658,6 +775,7 @@ export default {
         const windowWidth = viewportState.voi?.windowWidth || 400;
         const windowCenter = viewportState.voi?.windowCenter || 50;
         const zoomLevel = Math.round((viewportState.scale || 1) * 100);
+        const scale = viewportState.scale || 1;
         
         // 获取当前图像索引
         let currentImageIndex = 0;
@@ -689,6 +807,163 @@ export default {
         // 视口上方只显示当前帧数，不显示总帧数
         const imageNoDisplay = `${imageNo}`;
         
+        // 计算当前视口实际可见的物理视野大小（根据基础物理宽度 + 缩放）
+        try {
+          let baseWidthMmStr = overlay.dataset.baseWidthMm;
+          let baseWidthMm = baseWidthMmStr ? parseFloat(baseWidthMmStr) : null;
+
+          // 如果还没有缓存基础物理宽度，则尝试从 Cornerstone / series 信息 中轻量级推导一次并缓存
+          if ((!baseWidthMm || !isFinite(baseWidthMm) || baseWidthMm <= 0) && this.$cornerstone) {
+            try {
+              const enabledElement = this.$cornerstone.getEnabledElement(viewport);
+              const image = enabledElement && enabledElement.image;
+              if (image) {
+                const cols = image.columns || image.width || 0;
+                let spacing = null;
+
+                // 1) 优先使用 Cornerstone image 对象上的像素间距
+                if (image.columnPixelSpacing && isFinite(image.columnPixelSpacing) && image.columnPixelSpacing > 0) {
+                  spacing = Number(image.columnPixelSpacing);
+                } else if (image.rowPixelSpacing && isFinite(image.rowPixelSpacing) && image.rowPixelSpacing > 0) {
+                  spacing = Number(image.rowPixelSpacing);
+                }
+
+                // 2) 如果 image 上没有，尝试从 Cornerstone 元数据中获取（适用于多帧 / 动态影像）
+                if ((!spacing || !isFinite(spacing) || spacing <= 0) && this.$cornerstone.metaData) {
+                  try {
+                    const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
+                    const stack = stackState && stackState.data && stackState.data[0];
+                    const imageIds = stack && Array.isArray(stack.imageIds) ? stack.imageIds : null;
+                    const currentIndex = stack && typeof stack.currentImageIdIndex === 'number'
+                      ? stack.currentImageIdIndex
+                      : 0;
+                    const imageId = imageIds && imageIds[currentIndex] ? imageIds[currentIndex] : null;
+                    if (imageId) {
+                      const imagePlane = this.$cornerstone.metaData.get('imagePlaneModule', imageId);
+                      if (imagePlane && Array.isArray(imagePlane.pixelSpacing)) {
+                        const spacingArray = imagePlane.pixelSpacing
+                          .map(v => parseFloat(v))
+                          .filter(v => isFinite(v) && v > 0);
+                        // pixelSpacing: [rowSpacing, colSpacing]
+                        if (spacingArray.length >= 2) {
+                          spacing = spacingArray[1];
+                        } else if (spacingArray.length === 1) {
+                          spacing = spacingArray[0];
+                        }
+                      }
+                    }
+                  } catch (metaError) {
+                    // 元数据获取失败时忽略，保持 spacing 为空
+                  }
+                }
+
+                // 3) 如果依然没有 spacing，尝试使用系列级的校准/动态影像像素间距
+                try {
+                  const seriesIndex = parseInt(viewport.dataset.seriesIndex, 10);
+                  if (!isNaN(seriesIndex)) {
+                    const series = this.$store.state.dicom.dicomSeries[seriesIndex];
+                    if (series) {
+                      // 3.1 校准后的像素间距优先
+                      if (!spacing && series.calibratedPixelSpacing) {
+                        const cps = series.calibratedPixelSpacing;
+                        if (cps.col && isFinite(cps.col) && cps.col > 0) {
+                          spacing = Number(cps.col);
+                        } else if (cps.row && isFinite(cps.row) && cps.row > 0) {
+                          spacing = Number(cps.row);
+                        }
+                      }
+                      // 3.2 动态影像的 cineInfo 像素间距作为兜底
+                      if ((!spacing || !isFinite(spacing) || spacing <= 0) && series.cineInfo && series.cineInfo.pixelSpacing) {
+                        const ps = series.cineInfo.pixelSpacing;
+                        if (ps.col && isFinite(ps.col) && ps.col > 0) {
+                          spacing = Number(ps.col);
+                        } else if (ps.row && isFinite(ps.row) && ps.row > 0) {
+                          spacing = Number(ps.row);
+                        }
+                      }
+                    }
+                  }
+                } catch (cineError) {
+                  // spacing 解析失败时忽略
+                }
+
+                if (cols && spacing && isFinite(spacing) && spacing > 0) {
+                  baseWidthMm = cols * spacing;
+                  overlay.dataset.baseWidthMm = String(baseWidthMm);
+                }
+              }
+            } catch (innerError) {
+              // 轻量推导失败时保持现状，不影响后续逻辑
+            }
+          }
+
+          if (baseWidthMm && isFinite(baseWidthMm) && baseWidthMm > 0 && scale > 0) {
+            const widthMm = baseWidthMm / scale;
+            const widthCm = widthMm / 10;
+            const imageSizeElement = overlay.querySelector('.image-size-item');
+            if (imageSizeElement && isFinite(widthCm) && widthCm > 0) {
+              imageSizeElement.textContent = `${widthCm.toFixed(1)}cm`;
+            }
+          }
+        } catch (e) {
+          // 物理视野计算失败时不影响其它信息更新
+        }
+
+        // 根据当前缩放与物理视野大小，动态调整 X / Y 轴主刻度（按 10mm = 1cm 的国际通用标尺规则）
+        try {
+          const baseWidthMmStr = overlay.dataset.baseWidthMm;
+          const baseWidthMm = baseWidthMmStr ? parseFloat(baseWidthMmStr) : null;
+          if (baseWidthMm && isFinite(baseWidthMm) && baseWidthMm > 0 && scale > 0) {
+            const visibleWidthMm = baseWidthMm / scale;
+
+            // --- X 轴：水平方向标尺 ---
+            const xLines = overlay.querySelectorAll('.top_x_line');
+            if (xLines && xLines.length > 0) {
+              const tickCount = xLines.length;
+              const mmPerTick = visibleWidthMm / tickCount;
+              const halfTickMm = mmPerTick / 2;
+
+              xLines.forEach((lineEl, idx) => {
+                const posMm = idx * mmPerTick;
+                const mod10 = posMm % 10;
+                const distanceToCm =
+                  Math.min(Math.abs(mod10), Math.abs(mod10 - 10));
+
+                // 每 10mm（1cm）处为主刻度：最长刻度
+                if (distanceToCm <= halfTickMm) {
+                  lineEl.classList.add('top_x_line1');
+                } else {
+                  lineEl.classList.remove('top_x_line1');
+                }
+              });
+            }
+
+            // --- Y 轴：垂直方向标尺 ---
+            const yLines = overlay.querySelectorAll('.top_y_line');
+            if (yLines && yLines.length > 0) {
+              const tickCountY = yLines.length;
+              const mmPerTickY = visibleWidthMm / tickCountY;
+              const halfTickMmY = mmPerTickY / 2;
+
+              yLines.forEach((lineEl, idx) => {
+                const posMm = idx * mmPerTickY;
+                const mod10 = posMm % 10;
+                const distanceToCm =
+                  Math.min(Math.abs(mod10), Math.abs(mod10 - 10));
+
+                // 每 10mm（1cm）处为主刻度
+                if (distanceToCm <= halfTickMmY) {
+                  lineEl.classList.add('top_y_line1');
+                } else {
+                  lineEl.classList.remove('top_y_line1');
+                }
+              });
+            }
+          }
+        } catch (e) {
+          // 标尺刻度动态调整失败时不影响其它信息更新
+        }
+
         // 更新缩放级别
         const zoomElement = overlay.querySelector('.zoom-level-item');
         if (zoomElement) {
@@ -793,11 +1068,28 @@ export default {
       try {
         const tools = this.$cornerstoneTools;
         
-        // 首先停用所有工具（全局）
+        // 确保工具已添加到视口元素（如果还没有添加）
+        const originalWarn = console.warn;
+        console.warn = function() {}; // 临时禁用警告
+        try {
+          tools.addToolForElement(viewport, tools.WwwcTool);
+          tools.addToolForElement(viewport, tools.PanTool);
+          tools.addToolForElement(viewport, tools.ZoomTool);
+          tools.addToolForElement(viewport, tools.LengthTool);
+          tools.addToolForElement(viewport, tools.AngleTool);
+          tools.addToolForElement(viewport, tools.ProbeTool);
+          tools.addToolForElement(viewport, tools.RectangleRoiTool);
+        } catch (e) {
+          // 工具可能已添加过，忽略
+        } finally {
+          console.warn = originalWarn; // 恢复警告
+        }
+        
+        // 首先停用所有工具（针对该视口）
         const toolsToDeactivate = ['Wwwc', 'Pan', 'Zoom', 'Length', 'Angle', 'Probe', 'RectangleRoi', 'Crosshairs'];
         toolsToDeactivate.forEach(toolName => {
           try {
-            tools.setToolPassive(toolName);
+            tools.setToolPassiveForElement(viewport, toolName);
           } catch (e) {
             // 工具可能未注册，忽略
           }
@@ -806,25 +1098,25 @@ export default {
         // 获取当前激活的工具模式（从组件状态）
         const mode = this.mode || '4'; // 默认窗宽窗位
         
-        // 根据模式激活对应的工具（全局激活）
+        // 根据模式激活对应的工具（针对该视口激活）
         switch (mode) {
           case '1':
-            tools.setToolActive('Length', { mouseButtonMask: 1 });
+            tools.setToolActiveForElement(viewport, 'Length', { mouseButtonMask: 1 });
             break;
           case '2':
-            tools.setToolActive('Pan', { mouseButtonMask: 1 });
+            tools.setToolActiveForElement(viewport, 'Pan', { mouseButtonMask: 1 });
             break;
           case '3':
-            tools.setToolActive('Zoom', { mouseButtonMask: 1 });
+            tools.setToolActiveForElement(viewport, 'Zoom', { mouseButtonMask: 1 });
             break;
           case '4':
-            tools.setToolActive('Wwwc', { mouseButtonMask: 1 });
+            tools.setToolActiveForElement(viewport, 'Wwwc', { mouseButtonMask: 1 });
             break;
           case '5':
-            tools.setToolActive('Probe', { mouseButtonMask: 1 });
+            tools.setToolActiveForElement(viewport, 'Probe', { mouseButtonMask: 1 });
             break;
           default:
-            tools.setToolActive('Wwwc', { mouseButtonMask: 1 });
+            tools.setToolActiveForElement(viewport, 'Wwwc', { mouseButtonMask: 1 });
         }
         
         // 确保视口获得焦点（让工具事件正确绑定）

@@ -74,6 +74,15 @@ export class PlaybackService {
     this.onFrameChangeCallback = options.onFrameChange || null;
 
     const loop = options.loop !== false; // 默认循环
+    
+    // 保存播放参数，用于速度改变时重新启动
+    this._playbackParams = {
+      element,
+      imageIds,
+      startFrame,
+      endFrame,
+      loop
+    };
 
 
     // 开始播放循环
@@ -284,6 +293,7 @@ export class PlaybackService {
     }
 
     // 设置下一帧的定时器（只有在未到达边界或循环模式下）
+    // 注意：每次循环都重新计算间隔，这样速度改变时能立即生效
     const interval = 1000 / this.playbackControl.speed;
     this.playbackTimer = setTimeout(() => {
       this.playbackLoop(element, imageIds, validStartFrame, validEndFrame, loop);
@@ -346,6 +356,7 @@ export class PlaybackService {
 
     this.playbackControl.isPlaying = false;
     this.playbackControl.isPaused = true;
+    // 注意：不清除 _playbackParams，以便恢复播放时使用
   }
 
   /**
@@ -404,6 +415,20 @@ export class PlaybackService {
     
     const loop = options.loop !== undefined ? options.loop : true;
     
+    // 保存播放参数，用于速度改变时重新启动
+    this._playbackParams = {
+      element,
+      imageIds,
+      startFrame,
+      endFrame,
+      loop
+    };
+    
+    // 保存帧变化回调
+    if (options.onFrameChange) {
+      this.onFrameChangeCallback = options.onFrameChange;
+    }
+    
     this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
   }
 
@@ -411,8 +436,27 @@ export class PlaybackService {
    * 设置播放速度
    */
   setPlaybackSpeed(speed) {
+    const oldSpeed = this.playbackControl.speed;
     this.playbackControl.speed = Math.max(1, Math.min(30, speed)); // 限制在1-30帧/秒
-    // console.log('播放速度已设置:', this.playbackControl.speed);
+    
+    // 如果正在播放，需要重新启动播放循环以应用新速度
+    if (this.playbackControl.isPlaying && oldSpeed !== this.playbackControl.speed) {
+      // 清除当前定时器
+      if (this.playbackTimer) {
+        clearTimeout(this.playbackTimer);
+        this.playbackTimer = null;
+      }
+      
+      // 立即重新启动播放循环（使用新速度）
+      // 注意：需要保存当前的播放参数
+      if (this._playbackParams) {
+        const { element, imageIds, startFrame, endFrame, loop } = this._playbackParams;
+        const interval = 1000 / this.playbackControl.speed;
+        this.playbackTimer = setTimeout(() => {
+          this.playbackLoop(element, imageIds, startFrame, endFrame, loop);
+        }, interval);
+      }
+    }
   }
 
   /**

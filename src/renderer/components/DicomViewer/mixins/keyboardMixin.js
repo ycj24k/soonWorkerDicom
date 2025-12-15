@@ -50,77 +50,8 @@ export default {
       }
     },
 
-    /**
-     * 下一张图像
-     */
-    async nextImage() {
-      try {
-        const isGridActive = this.$store.state.viewer.gridViewState.isActive;
-        
-        if (isGridActive) {
-          // 网格模式：切换当前选中视口的图像（使用 Cornerstone scroll）
-          const element = this.getActiveElement();
-          if (element) {
-            const stackState = this.$cornerstoneTools.getToolState(element, 'stack');
-            if (stackState && stackState.data && stackState.data.length > 0) {
-              const stack = stackState.data[0];
-              const nextIndex = Math.min(stack.currentImageIdIndex + 1, stack.imageIds.length - 1);
-              if (nextIndex !== stack.currentImageIdIndex) {
-                stack.currentImageIdIndex = nextIndex;
-                const image = await this.$cornerstone.loadImage(stack.imageIds[nextIndex]);
-                this.$cornerstone.displayImage(element, image);
-              }
-            }
-          }
-        } else {
-          // 单视图模式：使用 store 切换
-          await this.$store.dispatch('dicom/nextImage');
-          await this.loadCurrentImage();
-        }
-      } catch (error) {
-        if (this.$errorHandler) {
-          this.$errorHandler.handleError(error, 'nextImage');
-        } else {
-          console.error('nextImage失败:', error);
-        }
-      }
-    },
-
-    /**
-     * 上一张图像
-     */
-    async previousImage() {
-      try {
-        const isGridActive = this.$store.state.viewer.gridViewState.isActive;
-        
-        if (isGridActive) {
-          // 网格模式：切换当前选中视口的图像（使用 Cornerstone scroll）
-          const element = this.getActiveElement();
-          if (element) {
-            const stackState = this.$cornerstoneTools.getToolState(element, 'stack');
-            if (stackState && stackState.data && stackState.data.length > 0) {
-              const stack = stackState.data[0];
-              const prevIndex = Math.max(stack.currentImageIdIndex - 1, 0);
-              if (prevIndex !== stack.currentImageIdIndex) {
-                stack.currentImageIdIndex = prevIndex;
-                const image = await this.$cornerstone.loadImage(stack.imageIds[prevIndex]);
-                this.$cornerstone.displayImage(element, image);
-              }
-            }
-          }
-        } else {
-          // 单视图模式：使用 store 切换
-          await this.$store.dispatch('dicom/previousImage');
-          await this.loadCurrentImage();
-        }
-      } catch (error) {
-        if (this.$errorHandler) {
-          this.$errorHandler.handleError(error, 'previousImage');
-        } else {
-          console.error('previousImage失败:', error);
-        }
-      }
-    }
+    // 注意：nextImage 和 previousImage 方法在 playbackMixin 中已实现（按影像切换）
+    // 这里不再重复定义，使用 playbackMixin 中的实现
   }
 };
 

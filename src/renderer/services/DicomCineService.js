@@ -59,6 +59,9 @@ export class DicomCineService {
       let frameTime = null;
       let cardiacNumberOfImages = null;
       let heartRate = null;
+      // 图像/探测器像素间距（用于后续距离和 imageSize 计算）
+      let pixelSpacing = null;         // (0028,0030) Pixel Spacing
+      let imagerPixelSpacing = null;   // (0018,1164) Imager Pixel Spacing
       
       try {
         // 尝试多种标签格式
@@ -81,12 +84,57 @@ export class DicomCineService {
                    rawData.string('00181015') ||
                    rawData.uint16('x00181015') ||
                    rawData.uint16('00181015');
+        
+        // Pixel Spacing (0028,0030)
+        try {
+          const ps = rawData.string('x00280030') || rawData.string('00280030');
+          if (ps) {
+            const parts = String(ps).split(/\\|,/).map(v => parseFloat(v));
+            if (parts.length >= 2 && parts.every(v => !isNaN(v) && v > 0)) {
+              pixelSpacing = { row: parts[0], col: parts[1], source: 'PixelSpacing' };
+            }
+          }
+        } catch (e) {
+          // 忽略 Pixel Spacing 解析错误，后续再尝试使用 getTagValue
+        }
+
+        // Imager Pixel Spacing (0018,1164)
+        try {
+          const ips = rawData.string('x00181164') || rawData.string('00181164');
+          if (ips) {
+            const parts = String(ips).split(/\\|,/).map(v => parseFloat(v));
+            if (parts.length >= 2 && parts.every(v => !isNaN(v) && v > 0)) {
+              imagerPixelSpacing = { row: parts[0], col: parts[1], source: 'ImagerPixelSpacing' };
+            }
+          }
+        } catch (e) {
+          // 忽略 Imager Pixel Spacing 解析错误
+        }
       } catch (error) {
         // 如果直接获取失败，使用getTagValue方法
         numberOfFrames = this.dicomService.getTagValue(dicomInfo, 'x00280008') || this.dicomService.getTagValue(dicomInfo, '00280008');
         frameTime = this.dicomService.getTagValue(dicomInfo, 'x00181063') || this.dicomService.getTagValue(dicomInfo, '00181063');
         cardiacNumberOfImages = this.dicomService.getTagValue(dicomInfo, 'x00181016') || this.dicomService.getTagValue(dicomInfo, '00181016');
         heartRate = this.dicomService.getTagValue(dicomInfo, 'x00181015') || this.dicomService.getTagValue(dicomInfo, '00181015');
+        // Pixel Spacing / Imager Pixel Spacing 兜底
+        if (!pixelSpacing) {
+          const ps = this.dicomService.getTagValue(dicomInfo, 'x00280030') || this.dicomService.getTagValue(dicomInfo, '00280030');
+          if (ps) {
+            const parts = String(ps).split(/\\|,/).map(v => parseFloat(v));
+            if (parts.length >= 2 && parts.every(v => !isNaN(v) && v > 0)) {
+              pixelSpacing = { row: parts[0], col: parts[1], source: 'PixelSpacing' };
+            }
+          }
+        }
+        if (!imagerPixelSpacing) {
+          const ips = this.dicomService.getTagValue(dicomInfo, 'x00181164') || this.dicomService.getTagValue(dicomInfo, '00181164');
+          if (ips) {
+            const parts = String(ips).split(/\\|,/).map(v => parseFloat(v));
+            if (parts.length >= 2 && parts.every(v => !isNaN(v) && v > 0)) {
+              imagerPixelSpacing = { row: parts[0], col: parts[1], source: 'ImagerPixelSpacing' };
+            }
+          }
+        }
       }
       
       // 检查其他可能的动态影像标签
@@ -129,7 +177,9 @@ export class DicomCineService {
             frameCount: frameCount,
             frameTime: frameTime,
             heartRate: heartRate,
-            type: 'multi-frame'
+            type: 'multi-frame',
+            // 保存像素间距信息（优先 Pixel Spacing，其次 Imager Pixel Spacing），供后续 imageSize 等功能使用
+            pixelSpacing: pixelSpacing || imagerPixelSpacing || null
           };
           return result;
         }
@@ -187,7 +237,9 @@ export class DicomCineService {
         parentCineImage: cineImageNode, // 指向原始动态影像
         frameIndex: frameIndex, // 帧索引
         frameId: `frame_${frameIndex}`,
-        cineInfo: cineInfo
+        cineInfo: cineInfo,
+        // 将像素间距信息下传到帧节点，便于后续 UI 计算 imageSize 等物理尺寸
+        pixelSpacing: cineInfo && cineInfo.pixelSpacing ? cineInfo.pixelSpacing : null
       };
       
       frameNodes.push(frameNode);

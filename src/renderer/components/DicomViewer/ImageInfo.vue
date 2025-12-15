@@ -54,6 +54,55 @@ export default {
   },
   methods: {
     /**
+     * 格式化 DICOM 日期：YYYYMMDD -> YYYY/MM/DD
+     */
+    formatDicomDate(value) {
+      if (!value || typeof value !== 'string') {
+        return value || '';
+      }
+      const trimmed = value.trim();
+      if (/[\/\-\.]/.test(trimmed)) {
+        return trimmed;
+      }
+      const digits = trimmed.replace(/[^\d]/g, '');
+      if (digits.length === 8) {
+        const y = digits.slice(0, 4);
+        const m = digits.slice(4, 6);
+        const d = digits.slice(6, 8);
+        return `${y}/${m}/${d}`;
+      }
+      return trimmed;
+    },
+
+    /**
+     * 格式化 DICOM 时间：HHMMSS(.ffff) -> HH:MM:SS[.ffff]
+     * 保留原始的小数部分精度
+     */
+    formatDicomTime(value) {
+      if (!value || typeof value !== 'string') {
+        return value || '';
+      }
+      const trimmed = value.trim();
+      if (/:/.test(trimmed)) {
+        return trimmed;
+      }
+      const main = trimmed.replace(/[^\d.]/g, '');
+      const fullMatch = main.match(/^(\d{2})(\d{2})(\d{2})(.*)$/);
+      if (fullMatch) {
+        const hh = fullMatch[1];
+        const mm = fullMatch[2];
+        const ss = fullMatch[3];
+        const suffix = fullMatch[4] || '';
+        return `${hh}:${mm}:${ss}${suffix}`;
+      }
+      const mmMatch = main.match(/^(\d{2})(\d{2})$/);
+      if (mmMatch) {
+        return `${mmMatch[1]}:${mmMatch[2]}`;
+      }
+      return trimmed;
+    },
+
+    /**
      * 显示图像信息对话框
      * @param {number} seriesIndex - 系列索引，可选，如果不传则使用当前活动系列
      */
@@ -62,12 +111,35 @@ export default {
         // 确定要显示的系列索引
         this.currentSeriesIndex = seriesIndex !== null ? seriesIndex : this.activeSeriesIndex;
         
-        // 从 Vuex store 获取当前系列的 DICOM 数据
+        // 从 Vuex store 获取当前系列的 DICOM 数据，并对日期/时间标签进行格式化，仅影响展示
         if (this.dicomDict && this.dicomDict[this.currentSeriesIndex]) {
           const seriesDict = this.dicomDict[this.currentSeriesIndex];
           if (Array.isArray(seriesDict) && seriesDict.length > 0) {
-            // dicomDict 中存储的是完整的 DICOM 标签数组，包含 tag, description, value
-            this.tableData = seriesDict;
+            const DATE_TAGS = new Set([
+              '00080020', // Study Date
+              '00080021', // Series Date
+              '00080022', // Acquisition Date
+              '00080023', // Content Date
+              '00100030'  // Patient Birth Date
+            ]);
+            const TIME_TAGS = new Set([
+              '00080030', // Study Time
+              '00080031', // Series Time
+              '00080032', // Acquisition Time
+              '00080033'  // Content Time
+            ]);
+
+            this.tableData = seriesDict.map(item => {
+              let value = item.value;
+              if (value && typeof value === 'string') {
+                if (DATE_TAGS.has(item.tag)) {
+                  value = this.formatDicomDate(value);
+                } else if (TIME_TAGS.has(item.tag)) {
+                  value = this.formatDicomTime(value);
+                }
+              }
+              return { ...item, value };
+            });
           } else {
             this.tableData = [];
           }

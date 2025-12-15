@@ -76,14 +76,15 @@ export function findDicomFiles(node, validator = validateDicomFile, imageIdBuild
 }
 
 /**
- * 构建Cornerstone图像ID
+ * 构建 Cornerstone 图像ID
+ * 统一使用本地文件 URI：wadouri:file://...，避免在开发模式下被当作 http://localhost:9080 路径请求
  * @param {Object} node - 节点对象
  * @param {boolean} node.isFrame - 是否为帧图像
  * @param {Object} node.parentCineImage - 父动态影像节点（帧图像时使用）
  * @param {string} node.path - 文件路径
  * @param {string} node.fullPath - 完整路径
  * @param {number} node.frameIndex - 帧索引（帧图像时使用）
- * @returns {string|null} 图像ID，格式为 wadouri:path 或 wadouri:path?frame=N
+ * @returns {string|null} 图像ID，格式为 wadouri:file://... 或 wadouri:file://...?frame=N
  */
 export function buildImageId(node) {
   if (!node) {
@@ -97,14 +98,41 @@ export function buildImageId(node) {
     return path.replace(/\\/g, '/');
   };
 
+  /**
+   * 将标准化后的本地路径转换为 file:// URI
+   * 说明：
+   * - Windows 绝对路径示例：E:/DICOM/xxx.dcm -> file:///E:/DICOM/xxx.dcm
+   * - POSIX 绝对路径示例：/Users/xxx/DICOM/xxx.dcm -> file:///Users/xxx/DICOM/xxx.dcm
+   * - 已经是 file:// 前缀时，直接返回，避免重复包裹
+   */
+  const toFileUri = (normalizedPath) => {
+    if (!normalizedPath) return normalizedPath;
+    if (normalizedPath.startsWith('file://')) {
+      return normalizedPath;
+    }
+
+    // Windows 盘符路径：例如 E:/ 或 C:/ 开头
+    if (/^[A-Za-z]:\//.test(normalizedPath)) {
+      return `file:///${normalizedPath}`;
+    }
+
+    // 其它情况统一按 POSIX 路径处理（/ 开头）
+    if (normalizedPath.startsWith('/')) {
+      return `file://${normalizedPath}`;
+    }
+
+    // 相对路径兜底处理：仍然作为 file:// 资源暴露
+    return `file://${normalizedPath}`;
+  };
+
   // 帧图像：使用 wadouri:path?frame=N 格式
   if (node.isFrame && node.parentCineImage) {
     const basePath = node.parentCineImage.fullPath || node.parentCineImage.path;
     // 检查 frameIndex 的合法性：必须是整数且非负
     if (basePath && Number.isInteger(node.frameIndex) && node.frameIndex >= 0) {
-      // 标准化路径（反斜杠转正斜杠）然后进行 URL 编码
-      const normalizedPath = normalizePath(basePath);
-      const encodedPath = encodeURI(normalizedPath);
+      // 标准化路径（反斜杠转正斜杠），转换为 file:// URI，然后进行 URL 编码
+      const fileUri = toFileUri(normalizePath(basePath));
+      const encodedPath = encodeURI(fileUri);
       return `wadouri:${encodedPath}?frame=${node.frameIndex}`;
     }
     return null;
@@ -113,9 +141,9 @@ export function buildImageId(node) {
   // 普通图像：使用 wadouri:path 格式
   const imagePath = node.fullPath || node.path;
   if (imagePath) {
-    // 标准化路径（反斜杠转正斜杠）然后进行 URL 编码
-    const normalizedPath = normalizePath(imagePath);
-    const encodedPath = encodeURI(normalizedPath);
+    // 标准化路径（反斜杠转正斜杠），转换为 file:// URI，然后进行 URL 编码
+    const fileUri = toFileUri(normalizePath(imagePath));
+    const encodedPath = encodeURI(fileUri);
     return `wadouri:${encodedPath}`;
   }
 

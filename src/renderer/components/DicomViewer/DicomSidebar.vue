@@ -12,11 +12,18 @@
           :indent="16"
           class="dicom-tree"
           highlight-current
+          @node-click="handleNodeClick"
         >
-          <span class="custom-tree-node" slot-scope="{ node, data }">
+          <span class="custom-tree-node" slot-scope="{ node, data }" @contextmenu.prevent="handleNodeContextMenu($event, data, node)">
             <span class="node-content">
               <i :class="getNodeIcon(node, data)" class="node-icon"></i>
               <span class="node-label">{{ node.label }}</span>
+              <i 
+                v-if="!data.isFile && data.children && data.children.length > 0"
+                class="el-icon-plus add-series-icon"
+                @click.stop="handleAddSeriesClick(data, node)"
+                title="添加到系列列表"
+              ></i>
             </span>
           </span>
         </el-tree>
@@ -27,6 +34,13 @@
     <div class="list_box">
       <div class="flex_box list_title">
         <div>系列</div>
+        <el-button 
+          type="text" 
+          icon="el-icon-delete" 
+          class="clear-btn"
+          @click="handleClearSeries"
+          title="清空系列列表"
+        ></el-button>
       </div>
       <div class="dicom_container">
         <div 
@@ -70,6 +84,78 @@ export default {
     ...mapGetters('dicom', ['currentSeries'])
   },
   methods: {
+    /**
+     * 清空系列列表
+     */
+    handleClearSeries() {
+      // 清空系列列表并重置视口
+      this.$store.dispatch('dicom/clearSeries');
+      // 通知父组件清空视口
+      this.$emit('clear-viewports');
+    },
+
+    /**
+     * 右键菜单 - 添加系列到列表
+     */
+    handleNodeContextMenu(event, data, node) {
+      if (!data || data.isFile) {
+        return; // 跳过文件节点
+      }
+      
+      // 右键直接添加系列（简化处理，不使用复杂菜单）
+      this.handleAddSeries(data, node);
+    },
+
+    /**
+     * 点击添加图标 - 加载系列并自动显示影像
+     */
+    async handleAddSeriesClick(data, node) {
+      await this.handleAddSeries(data, node);
+    },
+
+    /**
+     * 添加系列 - 加载系列并自动显示影像
+     */
+    async handleAddSeries(data, node) {
+      console.log('[DicomSidebar][handleAddSeries] 开始', { 
+        name: data?.name || data?.label, 
+        path: data?.path,
+        isFile: data?.isFile 
+      });
+      if (!data || data.isFile) {
+        console.log('[DicomSidebar][handleAddSeries] 跳过文件节点');
+        return; // 跳过文件节点
+      }
+      
+      // 加载系列
+      const result = await this.$store.dispatch('dicom/loadSeriesFromNode', data).catch(error => {
+        console.error('[DicomSidebar][handleAddSeries] 加载系列失败', error);
+        // 错误已在 action 中处理
+        return null;
+      });
+      
+      console.log('[DicomSidebar][handleAddSeries] 加载结果', result);
+      
+      // 如果有新系列添加，自动加载影像
+      if (result && result.newSeriesIndex !== undefined) {
+        console.log('[DicomSidebar][handleAddSeries] 等待 nextTick 后发送 select-series 事件', { newSeriesIndex: result.newSeriesIndex });
+        // 等待下一个tick，确保系列已经添加到store
+        await this.$nextTick();
+        // 通知父组件加载新系列
+        this.$emit('select-series', result.newSeriesIndex);
+        console.log('[DicomSidebar][handleAddSeries] 已发送 select-series 事件');
+      } else {
+        console.warn('[DicomSidebar][handleAddSeries] 没有新系列添加，不发送 select-series 事件');
+      }
+    },
+
+    /**
+     * 单击节点 - 展开/折叠树节点
+     */
+    handleNodeClick(data, node) {
+      // 单击用于展开/折叠树节点（el-tree 默认行为）
+    },
+
     getNodeIcon(node, data) {
       // 根节点 (Level 1) - 通常是患者或根目录
       if (node.level === 1) {
@@ -248,6 +334,24 @@ export default {
             overflow: hidden;
             text-overflow: ellipsis;
           }
+
+          .add-series-icon {
+            margin-left: 8px;
+            font-size: 14px;
+            color: #409EFF;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+            
+            &:hover {
+              color: #66b1ff;
+            }
+          }
+        }
+        
+        /* 悬停时显示添加图标 */
+        ::v-deep .el-tree-node__content:hover .add-series-icon {
+          opacity: 1;
         }
         
         /* 尝试添加层级连接线 (简化版) */
@@ -288,6 +392,18 @@ export default {
       padding: 0 14px;
       font-size: 12px;
       color: #7E7E7E;
+      justify-content: space-between;
+      align-items: center;
+
+      .clear-btn {
+        padding: 0;
+        font-size: 14px;
+        color: #7E7E7E;
+        
+        &:hover {
+          color: #409EFF;
+        }
+      }
     }
 
     .dicom_container {

@@ -1,4 +1,14 @@
 import { app, BrowserWindow, Menu, ipcMain  } from 'electron'
+// 使用 require 兼容 CommonJS 导出形式
+const remoteMain = require('@electron/remote/main')
+
+// 确保 @electron/remote 只在主进程中初始化一次，避免多次调用导致异常（兼容热重载场景）
+if (!global.__REMOTE_MAIN_INITIALIZED__) {
+  if (remoteMain && typeof remoteMain.initialize === 'function') {
+    remoteMain.initialize()
+  }
+  global.__REMOTE_MAIN_INITIALIZED__ = true
+}
 
 /**
  * Set `__static` path to static files in production
@@ -38,8 +48,9 @@ function createWindow () {
       // 4. 使用 IPC 通信处理文件系统操作
     }
   })
-  require("@electron/remote/main").initialize();
-  require("@electron/remote/main").enable(mainWindow.webContents);
+
+  // 为当前窗口启用 @electron/remote（initialize 已在模块加载时全局执行一次）
+  remoteMain.enable(mainWindow.webContents);
   // 禁用默认菜单
   Menu.setApplicationMenu(null);
   mainWindow.maximize();

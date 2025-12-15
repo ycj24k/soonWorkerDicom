@@ -59,8 +59,9 @@ export class DicomThumbnailService {
       // 解析 DICOM 文件
       const dataSet = dicomParser.parseDicom(byteArray);
       
-      // 使用cornerstone加载图像
-      const imageId = `wadouri:${imageNode.path}`;
+      // 使用 cornerstone 加载图像（统一使用 file:// 前缀，避免在开发模式下被当作 http://localhost:9080 路径）
+      const { buildImageId } = require('../utils/DicomUtils');
+      const imageId = buildImageId({ fullPath: imageNode.path, path: imageNode.path });
       const image = await cornerstone.loadImage(imageId);
       
       // 检查图像是否有效
@@ -186,7 +187,7 @@ export class DicomThumbnailService {
    * @returns {Array} 关键标签数组
    */
   parseKeyDicomTags(dataSet) {
-    // 解析21个关键标签（初始化加载时需要）
+    // 解析关键标签（初始化加载时需要，保持精简）
     const keyTags = [
       'x00080060', // Modality
       'x00200011', // Series Number
@@ -200,6 +201,8 @@ export class DicomThumbnailService {
       'x0020000d', // Study Instance UID
       'x00280010', // Rows
       'x00280011', // Columns
+      'x00280030', // Pixel Spacing
+      'x00181164', // Imager Pixel Spacing
       'x00280008', // Number of Frames
       'x00181063', // Frame Time
       'x00181065', // Frame Time Vector
