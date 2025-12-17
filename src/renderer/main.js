@@ -24,7 +24,6 @@ import Hammer from "hammerjs";
 import dicomParser from 'dicom-parser';
 import cornerstoneWadoImageLoader from "cornerstone-wado-image-loader";
 
-if (!process.env.IS_WEB) Vue.use(require('vue-electron'))
 Vue.http = Vue.prototype.$http = axios
 Vue.config.productionTip = false
 

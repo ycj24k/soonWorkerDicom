@@ -158,6 +158,17 @@ export class CornerstoneService {
       tools.addTool(tools.LengthTool); // 测量长度
       tools.addTool(tools.AngleTool); // 测量角度
       tools.addTool(tools.RectangleRoiTool); // 矩形ROI
+
+      // 统一长度工具的显示单位为 mm（Cornerstone 在有像素间距时会按 mm 计算）
+      try {
+        if (tools.LengthTool && typeof tools.LengthTool.setConfiguration === 'function') {
+          tools.LengthTool.setConfiguration({
+            displayUnits: 'mm'
+          });
+        }
+      } catch (cfgError) {
+        // 配置失败不影响工具使用
+      }
       
       // 激活默认工具
       tools.setToolActive('Pan', { mouseButtonMask: 1 });

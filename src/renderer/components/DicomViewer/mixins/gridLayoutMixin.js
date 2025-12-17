@@ -531,7 +531,7 @@ export default {
         const element = dicomDict.find(item => item.tag === tag);
         return element ? element.value : '';
       };
-
+      
       // 格式化 DICOM 日期：YYYYMMDD -> YYYY/MM/DD
       const formatDicomDate = (value) => {
         if (!value || typeof value !== 'string') {
@@ -666,18 +666,90 @@ export default {
         // 标签缺失或解析失败时保持默认值（11cm），由后续 updateViewportInfo 使用实际图像数据更新（如有）
       }
       
-      // 获取当前图像索引（从 stack state）
+      // 获取当前图像索引的优先级：
+      // 1. 如果视口对应的系列是活动系列，优先使用 activeImageIndex（单张播放的权威状态）
+      // 2. 否则，使用 Cornerstone stack state（反映实际显示的图像）
       let currentImageIndex = 0;
       try {
-        const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
-        if (stackState && stackState.data && stackState.data.length > 0) {
-          currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
+        const seriesIndexForInit = parseInt(viewport.dataset.seriesIndex, 10);
+        const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
+        if (!isNaN(seriesIndexForInit) && seriesIndexForInit === activeSeriesIndex) {
+          // 活动系列：优先使用 Vuex 的 activeImageIndex（单张播放会更新此值）
+          currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
+        } else {
+          // 非活动系列：使用 Cornerstone stack state（最准确，反映实际显示的图像）
+          const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
+          if (stackState && stackState.data && stackState.data.length > 0) {
+            currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
+          }
         }
       } catch (error) {
         // 忽略错误，使用默认值
       }
-      const imageNo = currentImageIndex + 1;
-      // 视口上方只显示当前帧数，不显示总帧数
+
+      // 默认使用当前索引（帧索引），再根据系列信息尽量转换为「影像文件序号」
+      let imageNo = currentImageIndex + 1;
+      try {
+        const seriesIndexForImageNo = parseInt(viewport.dataset.seriesIndex, 10);
+        if (!isNaN(seriesIndexForImageNo)) {
+          const dicomSeries = this.$store.state.dicom.dicomSeries || [];
+          const currentSeries = dicomSeries[seriesIndexForImageNo];
+          if (currentSeries) {
+            // 选取用于计算的节点源：优先使用 _allImageNodes，兜底使用 children
+            let sourceNodes = [];
+            if (Array.isArray(currentSeries._allImageNodes) && currentSeries._allImageNodes.length > 0) {
+              sourceNodes = currentSeries._allImageNodes;
+            } else if (Array.isArray(currentSeries.children) && currentSeries.children.length > 0) {
+              sourceNodes = currentSeries.children;
+            }
+
+            if (sourceNodes.length > 0) {
+              // 所有真正的「影像文件」节点（排除帧节点）
+              const imageFiles = sourceNodes.filter(child => child && child.isFile && !child.isFrame);
+              if (imageFiles.length > 0) {
+                // 当前视口对应的节点（优先从 children 取，其次从 sourceNodes 取）
+                let currentNode = null;
+                if (Array.isArray(currentSeries.children) && currentSeries.children[currentImageIndex]) {
+                  currentNode = currentSeries.children[currentImageIndex];
+                } else if (sourceNodes[currentImageIndex]) {
+                  currentNode = sourceNodes[currentImageIndex];
+                }
+
+                const getNodePath = (node) => {
+                  if (!node) return null;
+                  const p = node.fullPath || node.path || '';
+                  return p ? p.replace(/\\/g, '/').toLowerCase() : null;
+                };
+
+                let currentFileIndex = -1;
+                if (currentNode) {
+                  if (currentNode.isFrame && currentNode.parentCineImage) {
+                    // 当前是帧：使用父动态影像文件来计算序号
+                    const parentPath = getNodePath(currentNode.parentCineImage);
+                    if (parentPath) {
+                      currentFileIndex = imageFiles.findIndex(img => getNodePath(img) === parentPath);
+                    }
+                  } else if (currentNode.isFile && !currentNode.isFrame) {
+                    // 当前就是普通影像文件
+                    const currentPath = getNodePath(currentNode);
+                    if (currentPath) {
+                      currentFileIndex = imageFiles.findIndex(img => getNodePath(img) === currentPath);
+                    }
+                  }
+                }
+
+                if (currentFileIndex >= 0) {
+                  imageNo = currentFileIndex + 1;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // 影像序号计算失败时，退回到帧索引序号
+      }
+
+      // 视口上方显示「当前影像文件」的序号，而不是帧序号
       const imageNoDisplay = `${imageNo}`;
       
       // 创建方向指示数据（适当增加刻度数量，使标尺更长但仍居中，不与顶部患者信息重叠）
@@ -789,22 +861,87 @@ export default {
             }
           }
           
-          // 优先从 Cornerstone stack state 获取当前图像索引（最准确，反映实际显示的图像）
-          const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
-          if (stackState && stackState.data && stackState.data.length > 0) {
-            currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
+          // 获取当前图像索引的优先级：
+          // 1. 如果视口对应的系列是活动系列，优先使用 activeImageIndex（单张播放的权威状态）
+          // 2. 否则，使用 Cornerstone stack state（反映实际显示的图像）
+          const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
+          if (!isNaN(seriesIndex) && seriesIndex === activeSeriesIndex) {
+            // 活动系列：优先使用 Vuex 的 activeImageIndex（单张播放会更新此值）
+            currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
           } else {
-            // 如果没有 stack state，尝试从 Vuex 获取（作为后备）
-            const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
-            if (!isNaN(seriesIndex) && seriesIndex === activeSeriesIndex) {
-              currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
+            // 非活动系列：使用 Cornerstone stack state（最准确，反映实际显示的图像）
+            const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
+            if (stackState && stackState.data && stackState.data.length > 0) {
+              currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
             }
           }
         } catch (error) {
           // 忽略错误
         }
-        const imageNo = currentImageIndex + 1;
-        // 视口上方只显示当前帧数，不显示总帧数
+
+        // 默认使用当前索引（帧索引），再根据系列信息尽量转换为「影像文件序号」
+        let imageNo = currentImageIndex + 1;
+        try {
+          const seriesIndexForImageNo = parseInt(viewport.dataset.seriesIndex, 10);
+          if (!isNaN(seriesIndexForImageNo)) {
+            const dicomSeries = this.$store.state.dicom.dicomSeries || [];
+            const currentSeries = dicomSeries[seriesIndexForImageNo];
+            if (currentSeries) {
+              // 选取用于计算的节点源：优先使用 _allImageNodes，兜底使用 children
+              let sourceNodes = [];
+              if (Array.isArray(currentSeries._allImageNodes) && currentSeries._allImageNodes.length > 0) {
+                sourceNodes = currentSeries._allImageNodes;
+              } else if (Array.isArray(currentSeries.children) && currentSeries.children.length > 0) {
+                sourceNodes = currentSeries.children;
+              }
+
+              if (sourceNodes.length > 0) {
+                // 所有真正的「影像文件」节点（排除帧节点）
+                const imageFiles = sourceNodes.filter(child => child && child.isFile && !child.isFrame);
+                if (imageFiles.length > 0) {
+                  // 当前视口对应的节点（优先从 children 取，其次从 sourceNodes 取）
+                  let currentNode = null;
+                  if (Array.isArray(currentSeries.children) && currentSeries.children[currentImageIndex]) {
+                    currentNode = currentSeries.children[currentImageIndex];
+                  } else if (sourceNodes[currentImageIndex]) {
+                    currentNode = sourceNodes[currentImageIndex];
+                  }
+
+                  const getNodePath = (node) => {
+                    if (!node) return null;
+                    const p = node.fullPath || node.path || '';
+                    return p ? p.replace(/\\/g, '/').toLowerCase() : null;
+                  };
+
+                  let currentFileIndex = -1;
+                  if (currentNode) {
+                    if (currentNode.isFrame && currentNode.parentCineImage) {
+                      // 当前是帧：使用父动态影像文件来计算序号
+                      const parentPath = getNodePath(currentNode.parentCineImage);
+                      if (parentPath) {
+                        currentFileIndex = imageFiles.findIndex(img => getNodePath(img) === parentPath);
+                      }
+                    } else if (currentNode.isFile && !currentNode.isFrame) {
+                      // 当前就是普通影像文件
+                      const currentPath = getNodePath(currentNode);
+                      if (currentPath) {
+                        currentFileIndex = imageFiles.findIndex(img => getNodePath(img) === currentPath);
+                      }
+                    }
+                  }
+
+                  if (currentFileIndex >= 0) {
+                    imageNo = currentFileIndex + 1;
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // 影像序号计算失败时，退回到帧索引序号
+        }
+
+        // 视口上方显示「当前影像文件」的序号，而不是帧序号
         const imageNoDisplay = `${imageNo}`;
         
         // 计算当前视口实际可见的物理视野大小（根据基础物理宽度 + 缩放）
@@ -963,7 +1100,7 @@ export default {
         } catch (e) {
           // 标尺刻度动态调整失败时不影响其它信息更新
         }
-
+        
         // 更新缩放级别
         const zoomElement = overlay.querySelector('.zoom-level-item');
         if (zoomElement) {

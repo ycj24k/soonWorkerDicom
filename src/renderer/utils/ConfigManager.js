@@ -6,13 +6,16 @@
 const fs = require('fs');
 const path = require('path');
 
+const isProd = process.env.NODE_ENV === 'production';
+
 class ConfigManager {
   constructor() {
     this.config = null;
     this.configPath = null;
     this.defaultConfig = {
-      DICOM_PATH: './DICOM',
-      BACKUP_PATHS: ['./PATS', './dicom', './Dicom', './data', './Data'],
+      // 生产环境下会解析为 process.resourcesPath 下的相对目录，确保三端一致
+      // 默认绑定示例影像目录：cardsoon.com 目录
+      DICOM_PATH: 'cardsoon.com',
       AUTO_LOAD: true,
       DICOM_EXTENSIONS: ['.dcm', '.dicom', '.dic', '.ima'],
       MAX_SCAN_DEPTH: 10
@@ -50,7 +53,9 @@ class ConfigManager {
       'config.cfg'
     ];
 
-    const rootPath = process.cwd();
+    // 开发环境：使用项目根目录，方便调试
+    // 生产环境：使用 Electron 的 resources 目录，避免暴露安装路径
+    const rootPath = isProd ? process.resourcesPath : process.cwd();
     
     for (const configFile of possibleConfigFiles) {
       const configPath = path.join(rootPath, configFile);
@@ -70,10 +75,17 @@ class ConfigManager {
    */
   loadConfig() {
     try {
+      // 生产环境完全使用内置默认配置，不从磁盘读取/写入配置文件，避免暴露敏感路径
+      if (isProd) {
+        this.config = { ...this.defaultConfig };
+        return this.config;
+      }
+
+      // 开发环境：优先读取项目根目录下的配置文件，便于调试
       const configPath = this.getConfigFilePath();
       
       if (!fs.existsSync(configPath)) {
-        // 如果配置文件不存在，创建默认配置文件
+        // 如果配置文件不存在，创建一份默认模板文件，方便开发者修改
         this.createDefaultConfig(configPath);
         this.config = { ...this.defaultConfig };
         return this.config;
@@ -116,8 +128,6 @@ class ConfigManager {
           config[key] = value.toLowerCase() === 'true';
         } else if (key === 'MAX_SCAN_DEPTH') {
           config[key] = parseInt(value) || this.defaultConfig.MAX_SCAN_DEPTH;
-        } else if (key === 'BACKUP_PATHS') {
-          config[key] = value.split(';').map(p => p.trim()).filter(p => p);
         } else if (key === 'DICOM_EXTENSIONS') {
           config[key] = value.split(',').map(e => e.trim()).filter(e => e);
         } else {
@@ -146,11 +156,7 @@ class ConfigManager {
 # Mac: /Users/username/Documents/DICOM
 # 相对路径: ./DICOM 或 DICOM
 
-DICOM_PATH=./DICOM
-
-# 备用路径（如果主路径不存在，将尝试这些路径）
-# 用分号分隔多个路径
-BACKUP_PATHS=./PATS;./dicom;./Dicom;./data;./Data
+DICOM_PATH=cardsoon.com
 
 # 自动加载设置
 # true: 启动时自动加载默认目录
@@ -197,51 +203,32 @@ MAX_SCAN_DEPTH=10`;
   getDefaultDicomPath() {
     const config = this.getConfig();
     const mainPath = config.DICOM_PATH;
+    // 开发环境：以项目根目录为基准，方便调试
+    // 生产环境：以可执行文件所在目录为基准，只支持根目录 cardsoon.com
+    const rootPath = isProd ? path.dirname(process.execPath) : process.cwd();
     
     // 如果是相对路径，转换为绝对路径
     if (mainPath.startsWith('./') || mainPath.startsWith('../') || !path.isAbsolute(mainPath)) {
-      return this.normalizePath(path.resolve(process.cwd(), mainPath));
+      return this.normalizePath(path.resolve(rootPath, mainPath));
     }
     
     return this.normalizePath(mainPath);
   }
 
   /**
-   * 获取备用DICOM目录路径列表
-   */
-  getBackupDicomPaths() {
-    const config = this.getConfig();
-    const backupPaths = config.BACKUP_PATHS || [];
-    
-    return backupPaths.map(backupPath => {
-      if (backupPath.startsWith('./') || backupPath.startsWith('../') || !path.isAbsolute(backupPath)) {
-        return this.normalizePath(path.resolve(process.cwd(), backupPath));
-      }
-      return this.normalizePath(backupPath);
-    });
-  }
-
-  /**
    * 查找可用的DICOM目录
    */
   findAvailableDicomDirectory() {
-    // 首先尝试主路径
-    const mainPath = this.getDefaultDicomPath();
-    if (fs.existsSync(mainPath)) {
-      return mainPath;
+    // 仅使用一个确定的路径：
+    // 开发环境：项目根目录 + DICOM_PATH
+    // 生产环境：可执行文件所在目录 + DICOM_PATH
+    const dicomDir = this.getDefaultDicomPath();
+    if (fs.existsSync(dicomDir)) {
+      return dicomDir;
     }
 
-    // 尝试备用路径
-    const backupPaths = this.getBackupDicomPaths();
-    for (const backupPath of backupPaths) {
-      if (fs.existsSync(backupPath)) {
-        return backupPath;
-      }
-    }
-
-    // 如果都没找到，使用默认的目录查找逻辑
-    const defaultPath = this.findDicomDirectory();
-    return defaultPath;
+    // 如果路径不存在，不做任何回退，由上层决定如何提示用户
+    return null;
   }
 
   /**
@@ -280,6 +267,11 @@ MAX_SCAN_DEPTH=10`;
    */
   saveConfig() {
     try {
+      // 生产环境不在磁盘上保存明文配置，直接返回
+      if (isProd) {
+        return false;
+      }
+
       const configPath = this.getConfigFilePath();
       const config = this.getConfig();
       
@@ -288,7 +280,6 @@ MAX_SCAN_DEPTH=10`;
       content += '# 支持Windows、Linux、Mac跨平台路径格式\n\n';
       
       content += `DICOM_PATH=${config.DICOM_PATH}\n`;
-      content += `BACKUP_PATHS=${config.BACKUP_PATHS.join(';')}\n`;
       content += `AUTO_LOAD=${config.AUTO_LOAD}\n`;
       content += `DICOM_EXTENSIONS=${config.DICOM_EXTENSIONS.join(',')}\n`;
       content += `MAX_SCAN_DEPTH=${config.MAX_SCAN_DEPTH}\n`;
@@ -305,22 +296,10 @@ MAX_SCAN_DEPTH=10`;
    * 查找DICOM目录（默认逻辑）
    */
   findDicomDirectory(basePath = process.cwd()) {
-    const possiblePaths = [
-      path.join(basePath, 'DICOM'),
-      path.join(basePath, 'dicom'),
-      path.join(basePath, 'Dicom'),
-      path.join(basePath, 'PATS'),
-      path.join(basePath, 'pats'),
-      path.join(basePath, 'Pats'),
-      path.join(basePath, 'data'),
-      path.join(basePath, 'Data'),
-      path.join(basePath, 'DATA')
-    ];
-    
-    for (const testPath of possiblePaths) {
-      if (fs.existsSync(testPath)) {
-        return this.normalizePath(testPath);
-      }
+    // 为了避免误扫其他目录，默认查找逻辑仅作为向后兼容入口，内部直接委托 findAvailableDicomDirectory
+    const availablePath = this.findAvailableDicomDirectory();
+    if (availablePath) {
+      return availablePath;
     }
     
     return null;

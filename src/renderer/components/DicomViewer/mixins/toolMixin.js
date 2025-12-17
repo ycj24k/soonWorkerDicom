@@ -409,25 +409,63 @@ export default {
           return;
         }
 
-        // 如果 Cornerstone 已经根据 Pixel Spacing 计算过长度，则优先使用现有毫米值展示给用户
-        let measuredMm = null;
-        if (typeof measurement.length === 'number' && isFinite(measurement.length)) {
-          measuredMm = measurement.length;
-        } else if (measurement.cachedStats && typeof measurement.cachedStats.length === 'number') {
-          measuredMm = measurement.cachedStats.length;
+        // 计算当前基础像素间距（仅用于展示当前长度的物理值）
+        // 优先：已校准值 -> DICOM PixelSpacing/ImagerPixelSpacing -> 当前 image spacing -> 1mm/px
+        const seriesIndex = this.$store.state.dicom.activeSeriesIndex || 0;
+        const series = this.$store.state.dicom.dicomSeries[seriesIndex];
+        let baseSpacing = null;
+
+        if (series && series.calibratedPixelSpacing && isFinite(series.calibratedPixelSpacing.col) && series.calibratedPixelSpacing.col > 0) {
+          baseSpacing = series.calibratedPixelSpacing.col;
         }
 
-        // 如果没有现成的毫米值，就用像素距离近似展示
-        if (!measuredMm || !isFinite(measuredMm) || measuredMm <= 0) {
-          measuredMm = pixelDistance;
+        if (!baseSpacing) {
+          try {
+            const dicomDictArr = this.$store.state.dicom.dicomDict[seriesIndex] || [];
+            const findTag = (tag) => {
+              const item = Array.isArray(dicomDictArr) ? dicomDictArr.find(t => t.tag === tag) : null;
+              return item ? item.value : '';
+            };
+            let colSpacing = null;
+            const pixelSpacingTag = findTag('00280030');
+            if (pixelSpacingTag) {
+              const parts = String(pixelSpacingTag).split(/\\|,/).map(v => parseFloat(v));
+              if (parts.length >= 2 && !isNaN(parts[1])) {
+                colSpacing = parts[1];
+              } else if (parts.length === 1 && !isNaN(parts[0])) {
+                colSpacing = parts[0];
+              }
+            }
+            if (!colSpacing || !isFinite(colSpacing) || colSpacing <= 0) {
+              const imagerPixelSpacingTag = findTag('00181164');
+              if (imagerPixelSpacingTag) {
+                const parts = String(imagerPixelSpacingTag).split(/\\|,/).map(v => parseFloat(v));
+                if (parts.length >= 2 && !isNaN(parts[1])) {
+                  colSpacing = parts[1];
+                } else if (parts.length === 1 && !isNaN(parts[0])) {
+                  colSpacing = parts[0];
+                }
+              }
+            }
+            if (colSpacing && isFinite(colSpacing) && colSpacing > 0) {
+              baseSpacing = colSpacing;
+            }
+          } catch (e) {
+            // 忽略 DICOM 解析错误
+          }
         }
 
+        if (!baseSpacing || !isFinite(baseSpacing) || baseSpacing <= 0) {
+          baseSpacing = 1; // 默认 1mm/px，仅影响展示，不影响校准结果
+        }
+
+        const measuredMm = pixelDistance * baseSpacing;
         const measuredDisplay = measuredMm.toFixed(2);
 
         // 使用 ElementUI 的 prompt 弹出校准对话框
         // 将本次测量结果传递给校准对话框，由用户输入真实长度后再应用
         this.calibrationPixelDistance = pixelDistance;
-        this.calibrationMeasuredLength = measuredMm.toFixed(2);
+        this.calibrationMeasuredLength = measuredDisplay;
         this.calibrationRealLength = this.calibrationMeasuredLength;
         this.calibrationDialogVisible = true;
       } catch (error) {
@@ -493,88 +531,20 @@ export default {
         }
 
         let realLength = parseFloat(rawInput);
-        const measuredDisplay = parseFloat(String(this.calibrationMeasuredLength || '').trim());
         if (!pixelDistance || !isFinite(pixelDistance) || pixelDistance <= 0 ||
-            !realLength || !isFinite(realLength) || realLength <= 0 ||
-            !measuredDisplay || !isFinite(measuredDisplay) || measuredDisplay <= 0) {
+            !realLength || !isFinite(realLength) || realLength <= 0) {
           this.$message && this.$message.error('真实长度无效，点距调整已取消');
           this.finishPixelCalibration(false);
           return;
         }
-        
-        // 计算新的像素间距：采用“等比例”方式：
-        // newSpacing = baseSpacing * (realLength / measuredDisplay)
-        // 其中 baseSpacing 为当前系列正在使用的像素间距（优先：已校准值 -> DICOM PixelSpacing/ImagerPixelSpacing -> 当前 image spacing -> 1）
+
+        // 计算新的像素间距：直接使用真实长度 / 像素距离，保证物理含义正确
+        // realLength：用户输入的真实物理长度（mm）
+        // pixelDistance：当前标定线在图像中的像素距离（px）
+        const spacingMmPerPixel = realLength / pixelDistance;
+
         const seriesIndex = this.$store.state.dicom.activeSeriesIndex || 0;
         const series = this.$store.state.dicom.dicomSeries[seriesIndex];
-
-        let baseSpacing = null;
-        // 1) 已有的校准点距
-        if (series && series.calibratedPixelSpacing && isFinite(series.calibratedPixelSpacing.col) && series.calibratedPixelSpacing.col > 0) {
-          baseSpacing = series.calibratedPixelSpacing.col;
-        }
-
-        // 2) DICOM 标签中的 Pixel Spacing / Imager Pixel Spacing（与 imageSize 的初始来源保持一致）
-        if (!baseSpacing) {
-          try {
-            const dicomDictArr = this.$store.state.dicom.dicomDict[seriesIndex] || [];
-            const findTag = (tag) => {
-              const item = Array.isArray(dicomDictArr) ? dicomDictArr.find(t => t.tag === tag) : null;
-              return item ? item.value : '';
-            };
-            let colSpacing = null;
-            const pixelSpacingTag = findTag('00280030');
-            if (pixelSpacingTag) {
-              const parts = String(pixelSpacingTag).split(/\\|,/).map(v => parseFloat(v));
-              if (parts.length >= 2 && !isNaN(parts[1])) {
-                colSpacing = parts[1];
-              } else if (parts.length === 1 && !isNaN(parts[0])) {
-                colSpacing = parts[0];
-              }
-            }
-            if (!colSpacing || !isFinite(colSpacing) || colSpacing <= 0) {
-              const imagerPixelSpacingTag = findTag('00181164');
-              if (imagerPixelSpacingTag) {
-                const parts = String(imagerPixelSpacingTag).split(/\\|,/).map(v => parseFloat(v));
-                if (parts.length >= 2 && !isNaN(parts[1])) {
-                  colSpacing = parts[1];
-                } else if (parts.length === 1 && !isNaN(parts[0])) {
-                  colSpacing = parts[0];
-                }
-              }
-            }
-            if (colSpacing && isFinite(colSpacing) && colSpacing > 0) {
-              baseSpacing = colSpacing;
-            }
-          } catch (e) {
-            // 忽略 DICOM 解析错误
-          }
-        }
-
-        // 3) 当前 Cornerstone image 上的 spacing
-        let cornerstone, element, enabledElement, image;
-        try {
-          cornerstone = this.$cornerstone;
-          element = this._calibrationElement || this.getActiveElement();
-          enabledElement = cornerstone && element ? cornerstone.getEnabledElement(element) : null;
-          image = enabledElement && enabledElement.image;
-          if (!baseSpacing && image) {
-            const imgSpacing = image.columnPixelSpacing || image.rowPixelSpacing;
-            if (imgSpacing && isFinite(imgSpacing) && imgSpacing > 0) {
-              baseSpacing = imgSpacing;
-            }
-          }
-        } catch (e) {
-          // 忽略获取 image 失败
-        }
-
-        // 4) 全部获取失败时，退化为 1mm/px
-        if (!baseSpacing || !isFinite(baseSpacing) || baseSpacing <= 0) {
-          baseSpacing = 1;
-        }
-
-        const scaleFactor = realLength / measuredDisplay;
-        const spacingMmPerPixel = baseSpacing * scaleFactor;
 
         // 更新当前系列的像素间距（覆盖 Pixel Spacing），供后续标尺和测量使用
         if (series) {

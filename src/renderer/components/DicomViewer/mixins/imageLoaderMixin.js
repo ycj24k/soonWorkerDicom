@@ -470,6 +470,50 @@ export default {
           throw loadError;
         }
 
+        // 如果是动态影像或系列带有像素间距信息，确保 Cornerstone image 上设置了 row/column 像素间距
+        // 这样 Length / Angle / 面积 / 点距调整 等工具在动态影像上也会统一使用 mm 而不是 pixel
+        try {
+          if (image) {
+            let spacing = null;
+            if (image.columnPixelSpacing && isFinite(image.columnPixelSpacing) && image.columnPixelSpacing > 0) {
+              spacing = Number(image.columnPixelSpacing);
+            } else if (image.rowPixelSpacing && isFinite(image.rowPixelSpacing) && image.rowPixelSpacing > 0) {
+              spacing = Number(image.rowPixelSpacing);
+            }
+
+            if (!spacing || !isFinite(spacing) || spacing <= 0) {
+              const currentSeries = this.$store.state.dicom.dicomSeries[seriesIndex];
+              if (currentSeries) {
+                // 1) 优先使用已校准的像素间距
+                if (currentSeries.calibratedPixelSpacing) {
+                  const cps = currentSeries.calibratedPixelSpacing;
+                  if (cps.col && isFinite(cps.col) && cps.col > 0) {
+                    spacing = Number(cps.col);
+                  } else if (cps.row && isFinite(cps.row) && cps.row > 0) {
+                    spacing = Number(cps.row);
+                  }
+                }
+                // 2) 再使用动态影像的 cineInfo 像素间距
+                if ((!spacing || !isFinite(spacing) || spacing <= 0) && currentSeries.cineInfo && currentSeries.cineInfo.pixelSpacing) {
+                  const ps = currentSeries.cineInfo.pixelSpacing;
+                  if (ps.col && isFinite(ps.col) && ps.col > 0) {
+                    spacing = Number(ps.col);
+                  } else if (ps.row && isFinite(ps.row) && ps.row > 0) {
+                    spacing = Number(ps.row);
+                  }
+                }
+              }
+            }
+
+            if (spacing && isFinite(spacing) && spacing > 0) {
+              image.rowPixelSpacing = spacing;
+              image.columnPixelSpacing = spacing;
+            }
+          }
+        } catch (spacingError) {
+          // 像素间距设置失败不影响图像显示，静默忽略
+        }
+
         // 在 displayImage 之前再次确保 stack state 正确（防止事件触发时读取到旧值）
         const preDisplayStackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
         if (preDisplayStackState && preDisplayStackState.data && preDisplayStackState.data.length > 0) {
@@ -610,7 +654,7 @@ export default {
         
         // 加载当前图像
         await this.loadCurrentImage();
-
+        
         // 在首个系列和视口都准备好后，主动刷新一次患者/检查信息覆盖层
         // 说明：
         // - 自动加载的第一个系列有时会在 dicomDict 尚未完全就绪时先渲染 overlay，导致信息为空

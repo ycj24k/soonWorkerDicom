@@ -6,9 +6,6 @@ Vue.use(Router)
 export default new Router({
   routes: [
     { path: '/', component: () => import('@/components/DicomViewer/index'), name: '首页' },
-    // { path: '/dashboard-old', component: () => import('@/views/dashboard/index'), name: '旧版首页' },
-    // { path: '/home', component: () => import('@/views/home/index'), name: '首页' },
-    // { path: '/dashboard', component: () => import('@/views/dashboard/index'), name: '工作台' },
     { path: '/404', component: () => import('@/views/404') },
   ]
 })

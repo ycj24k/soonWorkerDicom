@@ -37,7 +37,7 @@ export class PathUtils {
    * @returns {string|null} - 找到的DICOM目录路径，如果不存在则返回null
    */
   static findDicomDirectory(basePath = process.cwd()) {
-    // 首先尝试从配置文件读取路径
+    // 仅通过 ConfigManager 中的配置或默认值查找，不再扫描其他目录
     try {
       // 延迟导入避免循环依赖
       const { ConfigManager } = require('./ConfigManager');
@@ -47,26 +47,7 @@ export class PathUtils {
         return configPath;
       }
     } catch (error) {
-      // 如果配置文件读取失败，继续使用默认逻辑
-    }
-
-    // 默认的目录查找逻辑
-    const possiblePaths = [
-      path.join(basePath, 'DICOM'),
-      path.join(basePath, 'dicom'),
-      path.join(basePath, 'Dicom'),
-      path.join(basePath, 'PATS'), // 兼容现有的PATS目录
-      path.join(basePath, 'pats'),
-      path.join(basePath, 'Pats'),
-      path.join(basePath, 'data'),
-      path.join(basePath, 'Data'),
-      path.join(basePath, 'DATA')
-    ];
-    
-    for (const testPath of possiblePaths) {
-      if (fs.existsSync(testPath)) {
-        return this.normalizePath(testPath);
-      }
+      // 如果配置文件读取失败，返回 null 由上层处理
     }
     
     return null;

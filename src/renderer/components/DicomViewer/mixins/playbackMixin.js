@@ -370,7 +370,27 @@ export default {
           return;
         }
 
-        const element = this.$refs.dicomViewer;
+        let element = this.$refs.dicomViewer;
+        if (!element && typeof this.getActiveElement === 'function') {
+          try {
+            const activeEl = this.getActiveElement();
+            if (activeEl) {
+              element = activeEl;
+            }
+          } catch (e) {
+            // 忽略 getActiveElement 失败
+          }
+        }
+        if (!element && typeof this.getGridViewportElements === 'function') {
+          const viewports = this.getGridViewportElements();
+          const selectedIndex = this.$store.state.viewer.gridViewState?.selectedViewportIndex || 0;
+          if (viewports && viewports[selectedIndex]) {
+            element = viewports[selectedIndex];
+          } else if (viewports && viewports.length > 0) {
+            element = viewports[0];
+          }
+        }
+
         if (!element) {
           console.error('找不到DICOM查看器元素');
           return;
@@ -386,7 +406,63 @@ export default {
           loop: playbackOptions.loop !== false,
           startFrame: Math.max(0, playbackOptions.startFrame || 0),
           endFrame: Math.min(imageIds.length - 1, playbackOptions.endFrame || imageIds.length - 1),
-          onComplete: playbackOptions.onComplete
+          onComplete: playbackOptions.onComplete,
+          // 帧变化时，同步当前影像序号到 Vuex / stack / 视口信息栏
+          onFrameChange: (frameIndex, imageId) => {
+            const actualIndex = Math.max(0, Math.min(frameIndex, imageIds.length - 1));
+            try {
+              // 1) 同步当前影像索引
+              this.$store.commit('dicom/SET_ACTIVE_IMAGE', actualIndex);
+
+              // 2) 尝试同步当前视口的 stack.currentImageIdIndex
+              if (this.$cornerstoneTools && element) {
+                const tools = this.$cornerstoneTools;
+                let targetElement = element;
+                if (typeof this.getActiveElement === 'function') {
+                  try {
+                    const activeEl = this.getActiveElement();
+                    if (activeEl) {
+                      targetElement = activeEl;
+                    }
+                  } catch (e) {
+                    // 忽略 getActiveElement 失败
+                  }
+                }
+                const stackState = tools.getToolState(targetElement, 'stack');
+                if (stackState && stackState.data && stackState.data.length > 0) {
+                  stackState.data[0].currentImageIdIndex = actualIndex;
+                }
+              }
+
+              // 3) 主动刷新一次视口信息栏（Image No）
+              if (typeof this.updateViewportInfo === 'function') {
+                let targetViewport = null;
+                if (typeof this.getGridViewportElements === 'function') {
+                  const viewports = this.getGridViewportElements();
+                  const selectedIndex = this.$store.state.viewer.gridViewState?.selectedViewportIndex || 0;
+                  if (viewports && viewports[selectedIndex]) {
+                    targetViewport = viewports[selectedIndex];
+                  } else if (viewports && viewports.length > 0) {
+                    targetViewport = viewports[0];
+                  }
+                }
+                if (!targetViewport) {
+                  targetViewport = element;
+                }
+                if (targetViewport) {
+                  const overlay = targetViewport.querySelector('.viewport-info-overlay') ||
+                    (targetViewport !== element
+                      ? element.querySelector('.viewport-info-overlay')
+                      : null);
+                  if (overlay) {
+                    this.updateViewportInfo(overlay, targetViewport);
+                  }
+                }
+              }
+            } catch (e) {
+              // 播放过程中信息同步失败时静默处理，避免中断播放
+            }
+          }
         };
 
         // 开始播放
@@ -709,6 +785,62 @@ export default {
             onComplete: () => {
               // 播放结束回调：重置播放状态
               this.$store.dispatch('viewer/stopPlayback', { type: 'regular' });
+            },
+            // 帧变化时，同步当前影像序号到 Vuex / stack / 视口信息栏
+            onFrameChange: (frameIndex, imageId) => {
+              const actualIndex = Math.max(0, Math.min(frameIndex, imageIds.length - 1));
+              try {
+                // 1) 同步当前影像索引
+                this.$store.commit('dicom/SET_ACTIVE_IMAGE', actualIndex);
+
+                // 2) 尝试同步当前视口的 stack.currentImageIdIndex
+                if (this.$cornerstoneTools && element) {
+                  const tools = this.$cornerstoneTools;
+                  let targetElement = element;
+                  if (typeof this.getActiveElement === 'function') {
+                    try {
+                      const activeEl = this.getActiveElement();
+                      if (activeEl) {
+                        targetElement = activeEl;
+                      }
+                    } catch (e) {
+                      // 忽略 getActiveElement 失败
+                    }
+                  }
+                  const stackState = tools.getToolState(targetElement, 'stack');
+                  if (stackState && stackState.data && stackState.data.length > 0) {
+                    stackState.data[0].currentImageIdIndex = actualIndex;
+                  }
+                }
+
+                // 3) 主动刷新一次视口信息栏（Image No）
+                if (typeof this.updateViewportInfo === 'function') {
+                  let targetViewport = null;
+                  if (typeof this.getGridViewportElements === 'function') {
+                    const viewports = this.getGridViewportElements();
+                    const selectedIndex = this.$store.state.viewer.gridViewState?.selectedViewportIndex || 0;
+                    if (viewports && viewports[selectedIndex]) {
+                      targetViewport = viewports[selectedIndex];
+                    } else if (viewports && viewports.length > 0) {
+                      targetViewport = viewports[0];
+                    }
+                  }
+                  if (!targetViewport) {
+                    targetViewport = element;
+                  }
+                  if (targetViewport) {
+                    const overlay = targetViewport.querySelector('.viewport-info-overlay') ||
+                      (targetViewport !== element
+                        ? element.querySelector('.viewport-info-overlay')
+                        : null);
+                    if (overlay) {
+                      this.updateViewportInfo(overlay, targetViewport);
+                    }
+                  }
+                }
+              } catch (e) {
+                // 播放过程中信息同步失败时静默处理
+              }
             }
           };
 

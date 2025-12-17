@@ -35,6 +35,7 @@
       @playback-next="handlePlaybackNext"
       @playback-play-pause="handlePlaybackPlayPause"
       @playback-speed-change="handlePlaybackSpeedChange"
+      @show-about="aboutDialogVisible = true"
     />
 
     <!-- 主内容区 -->
@@ -64,7 +65,7 @@
 
     <!-- 图像详细信息对话框 -->
     <ImageInfo ref="imageInfo" />
-
+    
     <!-- 点距校准对话框 -->
     <el-dialog
       title="点距调整"
@@ -102,6 +103,69 @@
       <span slot="footer" class="dialog-footer">
         <el-button size="small" @click="cancelPixelCalibration">取消</el-button>
         <el-button size="small" type="primary" @click="confirmPixelCalibration">确定</el-button>
+      </span>
+    </el-dialog>
+
+    <!-- 关于我们对话框 -->
+    <el-dialog
+      class="about-dialog"
+      title="关于 SOONDICOMER"
+      :visible.sync="aboutDialogVisible"
+      width="660px"
+      :close-on-click-modal="true"
+      :close-on-press-escape="true"
+      append-to-body
+    >
+      <div class="about-dialog__content">
+        <div class="about-dialog__header-bar">
+          <div class="about-dialog__product-name">SOONDICOMER</div>
+          <div class="about-dialog__subtitle">DICOM 影像查看器</div>
+        </div>
+
+        <div class="about-dialog__section">
+          <div class="about-dialog__row">
+            <span class="about-dialog__label">版本：</span>
+            <span class="about-dialog__value">v1.0.0 (64 bit)</span>
+          </div>
+          <div class="about-dialog__row">
+            <span class="about-dialog__label">版权：</span>
+            <span class="about-dialog__value">© 2024 SoonView. All rights reserved.</span>
+          </div>
+        </div>
+
+        <div class="about-dialog__section">
+          <div class="about-dialog__block-title">许可信息</div>
+          <div class="about-dialog__row">
+            <span class="about-dialog__label">Licensed to：</span>
+            <span class="about-dialog__value">SoonView 用户</span>
+          </div>
+          <div class="about-dialog__row">
+            <span class="about-dialog__label">Email：</span>
+            <span class="about-dialog__value">support@soonview.com</span>
+          </div>
+        </div>
+
+        <div class="about-dialog__section about-dialog__section--warning">
+          <div class="about-dialog__warning-title">警告</div>
+          <div class="about-dialog__warning-text">
+            本程序受著作权法和国际条约保护，未经授权，禁止复制、传播或用于商业用途，否则可能承担法律责任。
+          </div>
+        </div>
+
+        <div class="about-dialog__section about-dialog__section--links">
+          <div class="about-dialog__link-row">
+            官网：
+            <span class="about-dialog__link">https://www.soonview.com</span>
+          </div>
+          <div class="about-dialog__link-row">
+            支持：
+            <span class="about-dialog__link">support@soonview.com</span>
+          </div>
+        </div>
+      </div>
+
+      <span slot="footer" class="dialog-footer">
+        <el-button type="primary" size="small" @click="aboutDialogVisible = false">确定</el-button>
       </span>
     </el-dialog>
     
@@ -186,7 +250,9 @@ export default {
       calibrationDialogVisible: false,
       calibrationMeasuredLength: '',
       calibrationRealLength: '',
-      calibrationPixelDistance: 0
+      calibrationPixelDistance: 0,
+      // 关于我们对话框
+      aboutDialogVisible: false
     };
   },
   computed: {
@@ -979,6 +1045,122 @@ body {
   background-color: #67c23a;
   border-radius: 3px;
   transition: none; /* 无过渡动画，立即更新 */
+}
+
+/* 关于我们对话框样式 */
+.about-dialog {
+  .el-dialog__header {
+    padding: 10px 16px;
+    background: #0078d7;
+    border-bottom: 1px solid #0060b5;
+  }
+
+  .el-dialog__title {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .el-dialog__body {
+    padding: 0;
+    background: transparent;
+  }
+
+  .about-dialog__content {
+    font-size: 13px;
+    color: #333;
+    background: #f5f7fa;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  }
+
+  .about-dialog__header-bar {
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid #e4e7ed;
+    background: #f5f7fa;
+  }
+
+  .about-dialog__product-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+  }
+
+  .about-dialog__subtitle {
+    font-size: 13px;
+    color: #666;
+  }
+
+  .about-dialog__section {
+    padding: 10px 18px;
+    border-top: 1px solid #e4e7ed;
+
+    &.about-dialog__section--warning {
+      background: #fff;
+    }
+
+    &.about-dialog__section--links {
+      background: #f5f7fa;
+    }
+  }
+
+  .about-dialog__row {
+    display: flex;
+    margin-bottom: 4px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .about-dialog__label {
+    width: 90px;
+    color: #555;
+  }
+
+  .about-dialog__value {
+    flex: 1;
+    color: #333;
+  }
+
+  .about-dialog__block-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #333;
+  }
+
+  .about-dialog__warning-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #c0392b;
+  }
+
+  .about-dialog__warning-text {
+    font-size: 12px;
+    line-height: 1.6;
+    color: #666;
+  }
+
+  .about-dialog__link-row {
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 2px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .about-dialog__link {
+    color: #409eff;
+  }
+
+  .dialog-footer {
+    text-align: right;
+    padding: 8px 18px 12px;
+  }
 }
 
 @keyframes spin {

@@ -1,31 +1,53 @@
 # DICOM Viewer 配置文件
+
 # 此文件用于设置默认的DICOM目录路径
+
 # 支持Windows、Linux、Mac跨平台路径格式
 
-# 默认DICOM目录路径（相对于项目根目录）
-# 可以设置为绝对路径或相对路径
-# 示例：
-# Windows: C:\Users\Username\Documents\DICOM
-# Linux: /home/username/Documents/DICOM  
-# Mac: /Users/username/Documents/DICOM
-# 相对路径: ./DICOM 或 DICOM
-# ./DICOM/PAT00001
-# ./DICOM/张三
-DICOM_PATH=./DICOM/dicom
 
-# 备用路径（如果主路径不存在，将尝试这些路径）
-# 用分号分隔多个路径
-BACKUP_PATHS=./PATS;./dicom;./Dicom;./data;./Data
+
+# 默认DICOM目录路径（相对于项目根目录）
+
+# 可以设置为绝对路径或相对路径
+
+# 示例：
+
+# Windows: C:\Users\Username\Documents\DICOM
+
+# Linux: /home/username/Documents/DICOM  
+
+# Mac: /Users/username/Documents/DICOM
+
+# 相对路径: ./DICOM 或 DICOM
+
+# ./DICOM/PAT00001
+
+# ./DICOM/张三
+
+DICOM_PATH=cardsoon.com
+
+
 
 # 自动加载设置
+
 # true: 启动时自动加载默认目录
+
 # false: 需要手动选择目录
+
 AUTO_LOAD=true
 
+
+
 # 文件过滤设置
+
 # 支持的DICOM文件扩展名，用逗号分隔
+
 DICOM_EXTENSIONS=.dcm,.dicom,.dic,.ima
 
+
+
 # 目录扫描深度限制
+
 # 防止扫描过深的目录结构
+
 MAX_SCAN_DEPTH=10
