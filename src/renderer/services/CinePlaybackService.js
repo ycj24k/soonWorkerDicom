@@ -75,6 +75,8 @@ class CinePlaybackService {
       frameTime: cineInfo.frameTime || 50
     };
 
+    this.onFrameChange = options.onFrameChange || null;
+
     // 加载第一帧
     this.loadCurrentFrame();
 
@@ -90,12 +92,12 @@ class CinePlaybackService {
       // 基于帧时间计算合适的FPS
       return Math.round(1000 / cineInfo.frameTime);
     }
-    
+
     if (cineInfo.type === 'cardiac' && cineInfo.heartRate) {
       // 心脏影像基于心率
       return Math.round(cineInfo.heartRate / 60 * 2); // 每个心跳2帧
     }
-    
+
     // 默认速度
     return 10;
   }
@@ -189,11 +191,17 @@ class CinePlaybackService {
         cornerstone.displayImage(this.element, image);
 
         // 缓存图像（限制缓存大小）
+        // 缓存图像（限制缓存大小）
         this.loadedImages.set(frameImageId, image);
         if (this.loadedImages.size > 50) {
           // 移除最旧的缓存
           const firstKey = this.loadedImages.keys().next().value;
           this.loadedImages.delete(firstKey);
+        }
+
+        // 触发帧变化回调
+        if (typeof this.onFrameChange === 'function') {
+          this.onFrameChange(frameIndex);
         }
 
         return; // 成功加载，退出重试循环
@@ -261,7 +269,7 @@ class CinePlaybackService {
    */
   goToFrame(frameIndex) {
     const totalFrames = this.playbackControl.totalFrames;
-    
+
     // 验证帧索引
     if (frameIndex < 0 || frameIndex >= totalFrames) {
       console.error(`跳转帧索引超出范围: ${frameIndex}/${totalFrames}`);
@@ -353,15 +361,15 @@ class CinePlaybackService {
   cleanup() {
     // 停止播放
     this.stopCinePlayback();
-    
+
     // 清理图像缓存
     this.cleanupImages();
-    
+
     // 清理引用
     this.element = null;
     this.imageId = null;
     this.cineInfo = null;
-    
+
     // 重置播放控制
     this.playbackControl = {
       isPlaying: false,

@@ -187,22 +187,39 @@ export class DicomThumbnailService {
    * @returns {Array} 关键标签数组
    */
   parseKeyDicomTags(dataSet) {
-    // 解析关键标签（初始化加载时需要，保持精简）
+    // 解析关键标签（初始化加载时需要，保持精简但覆盖视口上所有关键信息）
     const keyTags = [
+      // 序列 / 研究基础信息
       'x00080060', // Modality
       'x00200011', // Series Number
       'x00080021', // Series Date
       'x00080031', // Series Time
       'x0008103e', // Series Description
       'x0020000e', // Series Instance UID
+      'x00080020', // Study Date
+      'x00080030', // Study Time
+      'x00080032', // Acquisition Time
+      'x00080050', // Accession Number
+      'x00080080', // Institution Name
+      'x00081030', // Study Description
+      // 患者信息（视口左上角）
       'x00100010', // Patient Name
       'x00100020', // Patient ID
-      'x00080020', // Study Date
+      'x00101010', // Patient Age
+      'x00100040', // Patient Sex
+      'x00100030', // Patient Birth Date
+      // 设备信息（视口右下角）
+      'x00080070', // Manufacturer
+      'x00081010', // Station Name
+      'x00081090', // Manufacturer's Model Name
+      // 研究级别 UID
       'x0020000d', // Study Instance UID
+      // 图像尺寸 / 像素间距（视口标尺和点距校准）
       'x00280010', // Rows
       'x00280011', // Columns
       'x00280030', // Pixel Spacing
       'x00181164', // Imager Pixel Spacing
+      // 动态影像相关
       'x00280008', // Number of Frames
       'x00181063', // Frame Time
       'x00181065', // Frame Time Vector

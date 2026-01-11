@@ -39,7 +39,9 @@ const state = {
     currentSeriesIndex: -1,
     currentLoaded: 0,
     currentTotal: 0
-  }
+  },
+  // 按需加载的完整 DICOM 标签字典（每个元素对应一个系列）
+  fullDicomDict: []
 };
 
 const mutations = {
@@ -197,6 +199,11 @@ const mutations = {
       currentLoaded: 0,
       currentTotal: 0
     };
+    state.fullDicomDict = [];
+  },
+
+  SET_FULL_DICOM_DICT(state, dict) {
+    state.fullDicomDict = dict;
   }
 };
 
@@ -516,53 +523,63 @@ const actions = {
       commit('RESET_SERIES_PROGRESS');
     }
     
-    // 第三步：后台静默加载完整标签（不显示进度，不影响用户体验）
-    // 使用 requestAnimationFrame 异步执行，不阻塞UI，性能更好
-    requestAnimationFrame(async () => {
-      const finalSeriesList = state.dicomSeries || [];
-      for (let i = 0; i < finalSeriesList.length; i++) {
-        const series = finalSeriesList[i];
-        const children = series && Array.isArray(series.children) ? series.children : [];
-        
-        if (children.length === 0) continue;
-        
-        // 检查是否已经完整解析
-        const currentDict = state.dicomDict[i];
-        const isFullyParsed = currentDict && currentDict._fullyParsed === true;
-        
-        if (!isFullyParsed) {
-          try {
-            // 找到该系列的第一张有效图像
-            const firstImage = children.find(child => 
-              child.isFile && child.path && dicomService.isDicomFile(child.path)
-            );
+    // 注意：完整 DICOM 标签解析改为按需触发，不在此处统一后台解析
+  },
 
-            if (firstImage) {
-              // 解析完整的DICOM标签
-              const fs = require('fs');
-              const dicomParser = require('dicom-parser');
-              const arrayBuffer = fs.readFileSync(firstImage.path).buffer;
-              const byteArray = new Uint8Array(arrayBuffer);
-              const dataSet = dicomParser.parseDicom(byteArray);
-              
-              // 使用DicomThumbnailService的完整解析方法
-              const fullDict = dicomService.thumbnailService.parseAllDicomTags(dataSet);
-              fullDict._fullyParsed = true; // 标记为已完整解析
-              
-              // 更新dicomDict
-              const newDicomDict = [...state.dicomDict];
-              newDicomDict[i] = fullDict;
-              commit('SET_DICOM_DICT', newDicomDict);
-              
-              // 每解析一个系列后让出事件循环，避免阻塞（使用 requestAnimationFrame 性能更好）
-              await new Promise((resolve) => requestAnimationFrame(resolve));
-            }
-          } catch (error) {
-            // 解析失败时静默处理，继续下一个系列
-          }
-        }
+  /**
+   * 按需加载指定系列的完整 DICOM 标签
+   * @param {Object} context - Vuex context
+   * @param {number|Object} payload - 系列索引或包含 seriesIndex 的对象
+   */
+  async loadFullDicomTagsForSeries({ state, commit }, payload) {
+    try {
+      const seriesIndex = typeof payload === 'number'
+        ? payload
+        : (payload && typeof payload.seriesIndex === 'number' ? payload.seriesIndex : state.activeSeriesIndex);
+
+      const seriesList = state.dicomSeries || [];
+      if (!Array.isArray(seriesList) || seriesIndex < 0 || seriesIndex >= seriesList.length) {
+        return;
       }
-    }, 0);
+
+      // 如果已经有完整解析结果且标记为 _fullyParsed，直接返回
+      const existingFullDict = state.fullDicomDict[seriesIndex];
+      if (existingFullDict && existingFullDict._fullyParsed === true) {
+        return;
+      }
+
+      const series = seriesList[seriesIndex];
+      const children = series && Array.isArray(series.children) ? series.children : [];
+      if (children.length === 0) {
+        return;
+      }
+
+      // 找到该系列的第一张有效图像（与原后台解析逻辑保持一致）
+      const firstImage = children.find(child =>
+        child.isFile && child.path && dicomService.isDicomFile(child.path)
+      );
+
+      if (!firstImage) {
+        return;
+      }
+
+      const fs = require('fs');
+      const dicomParser = require('dicom-parser');
+
+      const arrayBuffer = fs.readFileSync(firstImage.path).buffer;
+      const byteArray = new Uint8Array(arrayBuffer);
+      const dataSet = dicomParser.parseDicom(byteArray);
+
+      // 使用 DicomThumbnailService 的完整解析方法
+      const fullDict = dicomService.thumbnailService.parseAllDicomTags(dataSet);
+      fullDict._fullyParsed = true; // 标记为已完整解析
+
+      const newFullDicomDict = [...state.fullDicomDict];
+      newFullDicomDict[seriesIndex] = fullDict;
+      commit('SET_FULL_DICOM_DICT', newFullDicomDict);
+    } catch (error) {
+      // 按需完整解析失败时静默处理，避免影响主流程
+    }
   },
 
   /**

@@ -32,7 +32,7 @@ export default {
     async applyGridLayout(layout) {
       try {
         const element = this.$refs.dicomViewer;
-        
+
         // 在切换布局前，保存当前选中的视口对应的系列索引
         let currentSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
         if (this.isGridViewActive) {
@@ -48,17 +48,17 @@ export default {
             }
           }
         }
-        
+
         // 禁用主视图的 Cornerstone 元素（避免遮挡网格视口）
         try {
           this.$cornerstone.disable(element);
         } catch (error) {
           // 忽略错误，可能已经禁用
         }
-        
+
         // 更新当前选中的系列索引
         await this.$store.dispatch('dicom/selectDicomSeries', currentSeriesIndex);
-        
+
         await this.activateGridLayout(layout);
         await this.initializeGridView();
         this.closeGridLayoutSelector();
@@ -111,17 +111,17 @@ export default {
         if (!element) {
           return;
         }
-        
+
         const layout = this.$store.state.viewer.gridViewState.layout;
         await this.applyGridStyles(element, layout);
         await this.$nextTick();
-        
+
         const viewports = this.getGridViewportElements();
         if (viewports.length === 0) {
           this.createGridViewports(layout.rows, layout.cols);
           await this.$nextTick();
         }
-        
+
         // 加载多个系列到网格中
         await this.loadMultipleSeriesToGrid(layout);
       } catch (error) {
@@ -134,17 +134,17 @@ export default {
      */
     async applyGridStyles(element, layout) {
       const { rows, cols } = layout;
-      
+
       // 设置网格容器样式（行列由布局决定，其余由全局CSS控制）
       element.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
       element.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-      
+
       // 创建网格视口
       this.createGridViewports(rows, cols);
-      
+
       // 等待 DOM 更新完成
       await this.$nextTick();
-      
+
       // 为容器添加事件委托（处理所有视口的点击）
       this.setupGridViewportEvents(element);
     },
@@ -160,13 +160,13 @@ export default {
       if (this._gridWheelHandler) {
         container.removeEventListener('wheel', this._gridWheelHandler, true);
       }
-      
+
       // 创建新的事件处理器
       this._gridClickHandler = (e) => {
         // 查找被点击的视口
         let target = e.target;
         let viewport = null;
-        
+
         // 向上查找，直到找到 .grid-viewport 或到达容器
         while (target && target !== container) {
           if (target.classList && target.classList.contains('grid-viewport')) {
@@ -175,13 +175,13 @@ export default {
           }
           target = target.parentElement;
         }
-        
+
         if (viewport && viewport.dataset.viewportIndex !== undefined) {
           const viewportIndex = parseInt(viewport.dataset.viewportIndex, 10);
           this.selectGridViewport(viewportIndex);
         }
       };
-      
+
       // 添加事件监听器（使用捕获阶段，确保在 canvas 事件之前）
       container.addEventListener('mousedown', this._gridClickHandler, true);
 
@@ -344,7 +344,7 @@ export default {
         }
         viewport.remove();
       });
-      
+
       // 创建网格视口
       for (let i = 0; i < rows * cols; i++) {
         const viewport = document.createElement('div');
@@ -353,19 +353,19 @@ export default {
         viewport.style.position = 'relative';
         // cursor 样式由父容器继承，不在这里硬编码
         // 不在这里设置 border，使用 CSS 类和 outline 来避免被 canvas 遮挡
-        
+
         // 添加视口索引
         viewport.dataset.viewportIndex = i;
-        
+
         // 添加 tabindex 使其可以获得焦点（重要！）
         viewport.setAttribute('tabindex', '0');
-        
+
         // 不在这里添加 click 事件，因为 canvas 会覆盖
         // 改为使用 mousedown 事件（在 canvas 上也能触发）
-        
+
         element.appendChild(viewport);
       }
-      
+
       // 创建视口后，应用当前鼠标样式
       this.$nextTick(() => {
         if (typeof this.updateGridViewportCursors === 'function') {
@@ -381,29 +381,29 @@ export default {
       try {
         const { rows, cols } = layout;
         const totalSlots = rows * cols;
-        
+
         // 获取当前活动的系列
         const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
         const availableSeries = this.$store.state.dicom.dicomSeries;
         const currentSeries = availableSeries[activeSeriesIndex];
-        
+
         const viewports = this.getGridViewportElements();
-        
+
         // 初始化所有视口（启用 Cornerstone 和工具）
         for (let i = 0; i < totalSlots; i++) {
           const viewport = viewports[i];
           if (viewport) {
             // 启用 Cornerstone 元素
             this.$cornerstone.enable(viewport);
-            
+
             // 为视口添加 stack state manager
             this.$cornerstoneTools.addStackStateManager(viewport, ['stack']);
-            
+
             // 为每个视口注册所有可能用到的工具（不激活）
             const tools = this.$cornerstoneTools;
             // 临时禁用警告，避免重复添加工具的警告
             const originalWarn = console.warn;
-            console.warn = function() {}; // 临时禁用警告
+            console.warn = function () { }; // 临时禁用警告
             try {
               tools.addToolForElement(viewport, tools.WwwcTool);
               tools.addToolForElement(viewport, tools.PanTool);
@@ -412,7 +412,7 @@ export default {
               tools.addToolForElement(viewport, tools.AngleTool);
               tools.addToolForElement(viewport, tools.ProbeTool);
               tools.addToolForElement(viewport, tools.RectangleRoiTool);
-              
+
               // 添加滚轮切换工具（重要！）
               if (tools.StackScrollMouseWheelTool) {
                 tools.addToolForElement(viewport, tools.StackScrollMouseWheelTool);
@@ -424,11 +424,64 @@ export default {
             } finally {
               console.warn = originalWarn; // 恢复警告
             }
-            
+
             // 不在这里单独绑定事件，使用容器级别的事件委托（在 applyGridStyles 中已设置）
+
+            // 监听图像渲染事件，用于同步外部 UI (如播放控制台)
+            // 使用 cornerstoneimagerendered 可能太频繁，cornerstonenewimage 是切换图片的事件
+            viewport.addEventListener('cornerstonenewimage', (e) => {
+              try {
+                // 如果正在播放中，这由 playbackMixin 负责更新状态，这里不再重复处理，避免冲突
+                const isPlaying = this.$store.getters['viewer/isPlaying'] || false;
+                if (isPlaying) return;
+
+                // 如果当前视口是选中状态，或者是唯一的视口，则同步全局状态
+                const isSelected = viewport.classList.contains('selected');
+                const viewports = this.getGridViewportElements();
+                const isSingle = viewports.length === 1;
+
+                if (isSelected || isSingle) {
+                  const tools = this.$cornerstoneTools;
+                  const stackState = tools.getToolState(viewport, 'stack');
+                  if (stackState && stackState.data && stackState.data.length > 0) {
+                    const stack = stackState.data[0];
+                    const newImageIdIndex = stack.currentImageIdIndex;
+
+                    // 获取 seriesIndex
+                    const seriesIndex = parseInt(viewport.dataset.seriesIndex, 10);
+                    const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
+
+                    // 只有当操作的是当前活动系列的视口时，才更新全局 activeImageIndex
+                    if (seriesIndex === activeSeriesIndex && typeof newImageIdIndex === 'number') {
+                      // 将 stack index 映射回全局 children index
+                      // 这里的 stack.imageIds 通常对应 series.children (除非经过过滤)
+                      // 简单起见，假设一一对应。如果涉及到多帧组合，可能需要更复杂的映射
+
+                      // 使用防抖，避免滚轮高速滚动时频繁 commit vuex 导致卡顿
+                      if (this._syncImageIndexTimer) clearTimeout(this._syncImageIndexTimer);
+                      this._syncImageIndexTimer = setTimeout(() => {
+                        this.$store.commit('dicom/SET_ACTIVE_IMAGE', newImageIdIndex);
+
+                        // 强制更新视口信息 (Image No)，确保与播放状态同步
+                        if (typeof this.updateViewportInfo === 'function') {
+                          const overlay = viewport.querySelector('.grid-image-info-overlay');
+                          if (overlay) {
+                            this.updateViewportInfo(overlay, viewport);
+                          }
+                        }
+
+                        this._syncImageIndexTimer = null;
+                      }, 50);
+                    }
+                  }
+                }
+              } catch (err) {
+                // console.warn('Sync failed', err);
+              }
+            });
           }
         }
-        
+
         // 所有视口初始化完成后，激活默认工具（窗宽窗位）
         try {
           this.$cornerstoneTools.setToolActive('Wwwc', { mouseButtonMask: 1 });
@@ -465,15 +518,15 @@ export default {
       if (oldLabel) {
         oldLabel.remove();
       }
-      
+
       // 确保 seriesIndex 已设置
       viewport.dataset.seriesIndex = index;
-      
+
       // 系列标签已不需要，因为信息覆盖层会显示完整的系列信息
       // 直接为每个网格视口添加信息覆盖层容器
       this.addImageInfoOverlay(viewport);
     },
-    
+
     /**
      * 为网格视口添加信息覆盖层（完全复制主视图的样式，无背景遮罩）
      */
@@ -483,7 +536,7 @@ export default {
       if (oldOverlay) {
         oldOverlay.remove();
       }
-      
+
       // 创建信息覆盖层容器
       const overlay = document.createElement('div');
       overlay.className = 'grid-image-info-overlay';
@@ -496,15 +549,15 @@ export default {
         pointer-events: none;
         z-index: 999;
       `;
-      
+
       viewport.appendChild(overlay);
-      
+
       // 延迟渲染信息内容，确保数据已准备好
       setTimeout(() => {
         this.renderImageInfoToOverlay(overlay, viewport);
       }, 100);
     },
-    
+
     /**
      * 渲染图像信息到覆盖层
      */
@@ -514,24 +567,24 @@ export default {
       if (isNaN(seriesIndex)) {
         return;
       }
-      
+
       const series = this.$store.state.dicom.dicomSeries[seriesIndex];
       if (!series || !series.children || series.children.length === 0) {
         return;
       }
-      
+
       // 从 Vuex store 获取 DICOM 字典数据
       const dicomDict = this.$store.state.dicom.dicomDict[seriesIndex];
       if (!Array.isArray(dicomDict) || dicomDict.length === 0) {
         return;
       }
-      
+
       // 获取 DICOM 标签值
       const getDicomValue = (tag) => {
         const element = dicomDict.find(item => item.tag === tag);
         return element ? element.value : '';
       };
-      
+
       // 格式化 DICOM 日期：YYYYMMDD -> YYYY/MM/DD
       const formatDicomDate = (value) => {
         if (!value || typeof value !== 'string') {
@@ -579,25 +632,25 @@ export default {
         }
         return trimmed;
       };
-      
+
       const patientName = getDicomValue('00100010') || '';
       const patientAge = getDicomValue('00101010') || '';
       const patientSex = getDicomValue('00100040') || '';
       const patientBirthDate = formatDicomDate(getDicomValue('00100030') || '');
       const patientID = getDicomValue('00100020') || '';
       const accessionNumber = getDicomValue('00080050') || '';
-      
+
       const studyDate = formatDicomDate(getDicomValue('00080020') || '');
       const studyTime = formatDicomTime(getDicomValue('00080030') || '');
       const institution = getDicomValue('00080080') || '';
       const studyDesc = getDicomValue('00081030') || '';
       const seriesNo = getDicomValue('00200011') || '';
       const acqTime = formatDicomTime(getDicomValue('00080032') || '');
-      
+
       const model = getDicomValue('00081090') || '';
       const stationName = getDicomValue('00081010') || '';
       const manufacturer = getDicomValue('00080070') || '';
-      
+
       // 获取视口的窗宽窗位和缩放级别（从 Cornerstone viewport）
       let windowWidth = 400;
       let windowCenter = 50;
@@ -612,7 +665,7 @@ export default {
       } catch (error) {
         // 忽略错误，使用默认值
       }
-      
+
       // 获取图像尺寸（从 DICOM 标签，初始估算），并缓存基础物理宽度，后续在 updateViewportInfo 中结合缩放更新
       // 默认使用 11cm，保持原项目行为，在无法从 DICOM 获取 Pixel Spacing / Imager Pixel Spacing 时不会出现空白
       let imageSize = '11cm'; // 显示在右下角的水平视野长度（单位 cm）
@@ -659,36 +712,41 @@ export default {
             baseWidthMm = cols * effectiveSpacing; // 图像原始物理宽度（未考虑缩放）
             const widthCm = baseWidthMm / 10;
             // 只显示到 1 位小数，避免抖动太大
-            imageSize = `${widthCm.toFixed(1)}cm`;
+            // 如果计算出的值非常小（例如 < 1cm），也显示为 11cm 避免异常，或者按实际显示
+            if (widthCm > 0.1) {
+              imageSize = `${widthCm.toFixed(1)}cm`;
+            }
           }
         }
       } catch (e) {
         // 标签缺失或解析失败时保持默认值（11cm），由后续 updateViewportInfo 使用实际图像数据更新（如有）
       }
-      
+
       // 获取当前图像索引的优先级：
-      // 1. 如果视口对应的系列是活动系列，优先使用 activeImageIndex（单张播放的权威状态）
-      // 2. 否则，使用 Cornerstone stack state（反映实际显示的图像）
+      // 1. 优先使用 Cornerstone stack state（反映实际显示的图像，滚动时实时更新）
+      // 2. 只有在 stack state 不可用时，才尝试使用 Vuex 的 activeImageIndex
       let currentImageIndex = 0;
       try {
-        const seriesIndexForInit = parseInt(viewport.dataset.seriesIndex, 10);
-        const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
-        if (!isNaN(seriesIndexForInit) && seriesIndexForInit === activeSeriesIndex) {
-          // 活动系列：优先使用 Vuex 的 activeImageIndex（单张播放会更新此值）
-          currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
+        const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
+        if (stackState && stackState.data && stackState.data.length > 0) {
+          // 这是当前视口实际渲染的图片索引
+          currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
         } else {
-          // 非活动系列：使用 Cornerstone stack state（最准确，反映实际显示的图像）
-          const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
-          if (stackState && stackState.data && stackState.data.length > 0) {
-            currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
+          // 兜底：如果视口没有 stack state（罕见），且是活动系列，则用 Vuex
+          const seriesIndexForInit = parseInt(viewport.dataset.seriesIndex, 10);
+          const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
+          if (!isNaN(seriesIndexForInit) && seriesIndexForInit === activeSeriesIndex) {
+            currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
           }
         }
       } catch (error) {
         // 忽略错误，使用默认值
       }
 
-      // 默认使用当前索引（帧索引），再根据系列信息尽量转换为「影像文件序号」
-      let imageNo = currentImageIndex + 1;
+      // 计算影像文件序号（而非帧序号）
+      // 对于普通影像：1 个文件 = 1 帧，文件序号 = 帧索引 + 1
+      // 对于动态影像：1 个文件 = 多帧，需要找到当前帧所属的文件，显示文件序号
+      let imageNo = currentImageIndex + 1; // 默认值
       try {
         const seriesIndexForImageNo = parseInt(viewport.dataset.seriesIndex, 10);
         if (!isNaN(seriesIndexForImageNo)) {
@@ -751,11 +809,11 @@ export default {
 
       // 视口上方显示「当前影像文件」的序号，而不是帧序号
       const imageNoDisplay = `${imageNo}`;
-      
+
       // 创建方向指示数据（适当增加刻度数量，使标尺更长但仍居中，不与顶部患者信息重叠）
       const xData = Array.from({ length: 42 }, (_, i) => i);
       const yData = Array.from({ length: 30 }, (_, i) => i);
-      
+
       // 创建完整的信息显示
       overlay.innerHTML = `
         <!-- 患者信息 (左上) -->
@@ -810,77 +868,74 @@ export default {
           <div class="top_y_text">L</div>
         </div>
       `;
-      
+
       // 将基础物理宽度缓存到 overlay 上，供 updateViewportInfo 轻量级使用
       if (baseWidthMm && isFinite(baseWidthMm) && baseWidthMm > 0) {
         overlay.dataset.baseWidthMm = String(baseWidthMm);
       } else {
         delete overlay.dataset.baseWidthMm;
       }
-      
+
       // 立即更新一次
       this.updateViewportInfo(overlay, viewport);
-      
+
       // 使用 Cornerstone 事件监听，图像改变时自动更新（替代定时器）
       const updateHandler = () => {
         this.updateViewportInfo(overlay, viewport);
       };
-      
+
       // 保存事件处理器引用，便于清理
       viewport._infoUpdateHandler = updateHandler;
-      
+
       // 监听 Cornerstone 的图像渲染事件
       viewport.addEventListener('cornerstoneimagerendered', updateHandler);
       viewport.addEventListener('cornerstonenewimage', updateHandler)
     },
-    
+
     /**
      * 更新视口信息（实时更新窗宽窗位、缩放级别和图像编号）
+     * @param {HTMLElement} overlay - 覆盖层元素
+     * @param {HTMLElement} viewport - 视口元素
+     * @param {number|null} forceIndex - 强制使用的图像索引（用于播放时）
      */
-    updateViewportInfo(overlay, viewport) {
+    updateViewportInfo(overlay, viewport, forceIndex = null) {
       try {
         const viewportState = this.$cornerstone.getViewport(viewport);
         if (!viewportState) {
           return;
         }
-        
+
         const windowWidth = viewportState.voi?.windowWidth || 400;
         const windowCenter = viewportState.voi?.windowCenter || 50;
         const zoomLevel = Math.round((viewportState.scale || 1) * 100);
         const scale = viewportState.scale || 1;
-        
+
         // 获取当前图像索引
         let currentImageIndex = 0;
-        let totalImages = 1;
-        try {
-          const seriesIndex = parseInt(viewport.dataset.seriesIndex, 10);
-          if (!isNaN(seriesIndex)) {
-            const series = this.$store.state.dicom.dicomSeries[seriesIndex];
-            if (series && series.children) {
-              totalImages = series.children.length;
-            }
-          }
-          
-          // 获取当前图像索引的优先级：
-          // 1. 如果视口对应的系列是活动系列，优先使用 activeImageIndex（单张播放的权威状态）
-          // 2. 否则，使用 Cornerstone stack state（反映实际显示的图像）
-          const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
-          if (!isNaN(seriesIndex) && seriesIndex === activeSeriesIndex) {
-            // 活动系列：优先使用 Vuex 的 activeImageIndex（单张播放会更新此值）
-            currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
-          } else {
-            // 非活动系列：使用 Cornerstone stack state（最准确，反映实际显示的图像）
+        if (typeof forceIndex === 'number') {
+          currentImageIndex = forceIndex;
+        } else {
+          // 尝试从 Stack State 获取
+          try {
+            // 获取当前图像索引
+            // 1. 优先使用 Cornerstone stack state
             const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
             if (stackState && stackState.data && stackState.data.length > 0) {
               currentImageIndex = stackState.data[0].currentImageIdIndex || 0;
+            } else {
+              const seriesIndexForInit = parseInt(viewport.dataset.seriesIndex, 10);
+              const activeSeriesIndex = this.$store.state.dicom.activeSeriesIndex;
+              if (!isNaN(seriesIndexForInit) && seriesIndexForInit === activeSeriesIndex) {
+                currentImageIndex = this.$store.state.dicom.activeImageIndex || 0;
+              }
             }
+          } catch (error) {
+            // 忽略错误
           }
-        } catch (error) {
-          // 忽略错误
         }
 
-        // 默认使用当前索引（帧索引），再根据系列信息尽量转换为「影像文件序号」
-        let imageNo = currentImageIndex + 1;
+        // 计算影像文件序号（而非帧序号）
+        let imageNo = currentImageIndex + 1; // 默认值
         try {
           const seriesIndexForImageNo = parseInt(viewport.dataset.seriesIndex, 10);
           if (!isNaN(seriesIndexForImageNo)) {
@@ -914,8 +969,15 @@ export default {
                   };
 
                   let currentFileIndex = -1;
+                  const isDynamicSeries = this.$store.state.dicom.isDynamicSeries;
+
                   if (currentNode) {
-                    if (currentNode.isFrame && currentNode.parentCineImage) {
+                    // 如果是动态影像系列，或者显式要求显示帧序号，则忽略文件映射
+                    if (isDynamicSeries && currentNode.isFrame) {
+                      // 动态影像：直接使用帧索引作为ImageNo，保持与播放栏同步
+                      imageNo = currentImageIndex + 1;
+                      currentFileIndex = -2; // 标记为已处理
+                    } else if (currentNode.isFrame && currentNode.parentCineImage) {
                       // 当前是帧：使用父动态影像文件来计算序号
                       const parentPath = getNodePath(currentNode.parentCineImage);
                       if (parentPath) {
@@ -943,7 +1005,7 @@ export default {
 
         // 视口上方显示「当前影像文件」的序号，而不是帧序号
         const imageNoDisplay = `${imageNo}`;
-        
+
         // 计算当前视口实际可见的物理视野大小（根据基础物理宽度 + 缩放）
         try {
           let baseWidthMmStr = overlay.dataset.baseWidthMm;
@@ -1100,13 +1162,13 @@ export default {
         } catch (e) {
           // 标尺刻度动态调整失败时不影响其它信息更新
         }
-        
+
         // 更新缩放级别
         const zoomElement = overlay.querySelector('.zoom-level-item');
         if (zoomElement) {
           zoomElement.textContent = `${zoomLevel}%`;
         }
-        
+
         // 更新窗宽窗位
         const windowWidthElement = overlay.querySelector('.window-width-value');
         const windowCenterElement = overlay.querySelector('.window-center-value');
@@ -1116,7 +1178,7 @@ export default {
         if (windowCenterElement) {
           windowCenterElement.textContent = windowCenter;
         }
-        
+
         // 更新图像编号（显示帧数）
         const imageNoElement = overlay.querySelector('.image-no-item');
         if (imageNoElement) {
@@ -1126,7 +1188,7 @@ export default {
         // 忽略错误
       }
     },
-    
+
     /**
      * 获取 DICOM 标签值
      */
@@ -1149,7 +1211,7 @@ export default {
       if (viewports.length === 0) {
         return;
       }
-      
+
       // 清除所有视口的选中状态
       viewports.forEach(viewport => {
         viewport.classList.remove('selected');
@@ -1163,23 +1225,23 @@ export default {
           label.classList.remove('selected');
         }
       });
-      
+
       // 选中当前视口
       if (viewports[viewportIndex]) {
         const selectedViewport = viewports[viewportIndex];
-        
+
         // 添加选中类名
         selectedViewport.classList.add('selected');
-        
+
         // 强制添加内联样式确保可见
         selectedViewport.style.outline = '4px solid #ff0000';
         selectedViewport.style.outlineOffset = '-4px';
         selectedViewport.style.boxShadow = '0 0 20px rgba(255, 0, 0, 1), 0 0 40px rgba(255, 0, 0, 0.6), inset 0 0 30px rgba(255, 0, 0, 0.25)';
         selectedViewport.style.zIndex = '10';
-        
+
         // 更新store中的选中视口索引
         this.$store.dispatch('viewer/selectGridViewport', viewportIndex);
-        
+
         // 如果该视口绑定了系列，同步更新左侧系列列表的选中状态
         if (selectedViewport.dataset.seriesIndex !== undefined) {
           const seriesIndex = parseInt(selectedViewport.dataset.seriesIndex, 10);
@@ -1188,12 +1250,12 @@ export default {
             this.$store.dispatch('dicom/selectDicomSeries', seriesIndex);
           }
         }
-        
+
         // 最后激活工具（确保 store 已更新）
         this.activateToolsForViewport(selectedViewport);
       }
     },
-    
+
     /**
      * 为选中的视口激活当前工具
      */
@@ -1201,13 +1263,13 @@ export default {
       if (!viewport) {
         return;
       }
-      
+
       try {
         const tools = this.$cornerstoneTools;
-        
+
         // 确保工具已添加到视口元素（如果还没有添加）
         const originalWarn = console.warn;
-        console.warn = function() {}; // 临时禁用警告
+        console.warn = function () { }; // 临时禁用警告
         try {
           tools.addToolForElement(viewport, tools.WwwcTool);
           tools.addToolForElement(viewport, tools.PanTool);
@@ -1221,7 +1283,7 @@ export default {
         } finally {
           console.warn = originalWarn; // 恢复警告
         }
-        
+
         // 首先停用所有工具（针对该视口）
         const toolsToDeactivate = ['Wwwc', 'Pan', 'Zoom', 'Length', 'Angle', 'Probe', 'RectangleRoi', 'Crosshairs'];
         toolsToDeactivate.forEach(toolName => {
@@ -1231,10 +1293,10 @@ export default {
             // 工具可能未注册，忽略
           }
         });
-        
+
         // 获取当前激活的工具模式（从组件状态）
         const mode = this.mode || '4'; // 默认窗宽窗位
-        
+
         // 根据模式激活对应的工具（针对该视口激活）
         switch (mode) {
           case '1':
@@ -1255,7 +1317,7 @@ export default {
           default:
             tools.setToolActiveForElement(viewport, 'Wwwc', { mouseButtonMask: 1 });
         }
-        
+
         // 确保视口获得焦点（让工具事件正确绑定）
         if (viewport.focus) {
           viewport.focus();

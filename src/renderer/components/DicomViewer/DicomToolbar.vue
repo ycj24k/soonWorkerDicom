@@ -24,10 +24,12 @@
           </div>
         </div> -->
         <div class="flex_box flex_col_top action_btns">
-          <div class="action_btn" :class="{ 'action_btn1': actionClick === 3 }">
+          <div class="action_btn" :class="{ 'action_btn1': actionClick === 3 }" @mousedown="actionClick = 3"
+            @mouseup="actionClick = 0" @click="handleOpenDirectory">
             <img class="action_img" src="@/assets/images/action25.png" />
           </div>
-          <div class="action_btn" :class="{ 'action_btn1': actionClick === 4 }">
+          <div class="action_btn" :class="{ 'action_btn1': actionClick === 4 }" @mousedown="actionClick = 4"
+            @mouseup="actionClick = 0" @click="handleOpenFile">
             <img class="action_img" src="@/assets/images/action26.png" />
           </div>
         </div>
@@ -40,13 +42,8 @@
 
     <div class="action_item">
       <div class="flex_box flex_col_top action_btns">
-        <div
-          class="action_btn"
-          :class="{ 'action_btn1': actionClick === 10 }"
-          @mousedown="actionClick = 10"
-          @mouseup="actionClick = 0"
-          @click="$emit('show-about')"
-        >
+        <div class="action_btn" :class="{ 'action_btn1': actionClick === 10 }" @mousedown="actionClick = 10"
+          @mouseup="actionClick = 0" @click="$emit('show-about')">
           <img class="action_img" src="@/assets/images/action18.png" />
         </div>
       </div>
@@ -233,9 +230,12 @@
         </div>
         <!-- 播放控制台 -->
         <SinglePlaybackConsole :show="showPlaybackConsole" :is-playing="isPlaybackPlaying" :speed="playbackSpeed"
-          :is-first="isPlaybackFirst" :is-last="isPlaybackLast" @close="$emit('close-playback-console')"
-          @previous="$emit('playback-previous')" @next="$emit('playback-next')"
-          @play-pause="$emit('playback-play-pause')" @speed-change="$emit('playback-speed-change', $event)" />
+          :is-first="isPlaybackFirst" :is-last="isPlaybackLast" :is-multi-frame="isMultiFrame"
+          :current-frame="currentFrame" :total-frames="totalFrames" :is-first-frame="isFirstFrame"
+          :is-last-frame="isLastFrame" @close="$emit('close-playback-console')" @previous="$emit('playback-previous')"
+          @next="$emit('playback-next')" @play-pause="$emit('playback-play-pause')"
+          @speed-change="$emit('playback-speed-change', $event)" @previous-frame="$emit('playback-previous-frame')"
+          @next-frame="$emit('playback-next-frame')" />
       </div>
 
       <div class="action_item">
@@ -364,6 +364,27 @@ export default {
     isPlaybackLast: {
       type: Boolean,
       default: false
+    },
+    // 帧导航相关props
+    isMultiFrame: {
+      type: Boolean,
+      default: false
+    },
+    currentFrame: {
+      type: Number,
+      default: 1
+    },
+    totalFrames: {
+      type: Number,
+      default: 1
+    },
+    isFirstFrame: {
+      type: Boolean,
+      default: true
+    },
+    isLastFrame: {
+      type: Boolean,
+      default: true
     }
   },
   data() {
@@ -380,9 +401,20 @@ export default {
     };
   },
   computed: {
+    ...mapGetters(['isVerified']),
     ...mapGetters('viewer', ['isToolActive', 'currentWindowLevelPreset', 'isGridViewActive', 'isPlaying'])
   },
   methods: {
+    handleOpenDirectory() {
+      if (this.isVerified) {
+        this.$emit('open-directory');
+      }
+    },
+    handleOpenFile() {
+      if (this.isVerified) {
+        this.$emit('open-file');
+      }
+    },
     // 处理窗宽窗位按钮点击（根据点击位置判断是左侧还是右侧）
     handleWwwcButtonClick(event) {
       const button = event.currentTarget;
@@ -431,6 +463,8 @@ export default {
   height: 88px;
   padding: 0 10px;
   gap: 15px;
+  position: relative;
+  z-index: 100;
 
   .action_img {
     width: 35px;

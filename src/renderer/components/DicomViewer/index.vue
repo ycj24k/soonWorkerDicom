@@ -2,41 +2,25 @@
   <div class="container_box">
     <!-- 头部标题栏 -->
     <div class="flex_box flex_row_between header_box">
-      <div class="header_title">SOONDICOMER</div>
+      <div class="header_title">{{ systemName }}</div>
       <div class="flex_box header_btns">
         <el-button @click="closeApp" icon="el-icon-close" class="header_btn"></el-button>
       </div>
     </div>
 
     <!-- 工具栏 -->
-    <DicomToolbar 
-      :active-action="activeAction"
-      :active2="active2"
-      :show-playback-console="showPlaybackConsole"
-      :is-playback-playing="isPlaybackPlaying"
-      :playback-speed="playbackSpeed"
-      :is-playback-first="isPlaybackFirst"
-      :is-playback-last="isPlaybackLast"
-      @open-directory="selectPath"
-      @open-file="selectFile"
-      @reset-viewport="resetViewport"
-      @rotate-image="rotateImage"
-      @flip-image="flipImage"
-      @fit-to-window="fitToWindow"
-      @invert-image="invertImage"
-      @activate-tool="activateTool"
-      @set-window-level="setWindowLevel"
-      @clear-measurements="clearMeasurements"
-      @show-image-info="showImageInfo"
-      @toggle-grid-layout="toggleGridLayout"
-      @update:active2="active2 = $event"
-      @close-playback-console="handleClosePlaybackConsole"
-      @playback-previous="handlePlaybackPrevious"
-      @playback-next="handlePlaybackNext"
-      @playback-play-pause="handlePlaybackPlayPause"
-      @playback-speed-change="handlePlaybackSpeedChange"
-      @show-about="aboutDialogVisible = true"
-    />
+    <DicomToolbar :active-action="activeAction" :active2="active2" :show-playback-console="showPlaybackConsole"
+      :is-playback-playing="isPlaybackPlaying" :playback-speed="playbackSpeed" :is-playback-first="isPlaybackFirst"
+      :is-playback-last="isPlaybackLast" :is-multi-frame="isMultiFrame" :current-frame="currentFrame"
+      :total-frames="totalFrames" :is-first-frame="isFirstFrame" :is-last-frame="isLastFrame"
+      @open-directory="selectPath" @open-file="selectFile" @reset-viewport="resetViewport" @rotate-image="rotateImage"
+      @flip-image="flipImage" @fit-to-window="fitToWindow" @invert-image="invertImage" @activate-tool="activateTool"
+      @set-window-level="setWindowLevel" @clear-measurements="clearMeasurements" @show-image-info="showImageInfo"
+      @toggle-grid-layout="toggleGridLayout" @update:active2="active2 = $event"
+      @close-playback-console="handleClosePlaybackConsole" @playback-previous="handlePlaybackPrevious"
+      @playback-next="handlePlaybackNext" @playback-play-pause="handlePlaybackPlayPause"
+      @playback-speed-change="handlePlaybackSpeedChange" @playback-previous-frame="handlePlaybackPreviousFrame"
+      @playback-next-frame="handlePlaybackNextFrame" @show-about="aboutDialogVisible = true" />
 
     <!-- 主内容区 -->
     <div class="flex_box content_box">
@@ -44,55 +28,32 @@
       <DicomSidebar @select-series="selectSeries" @clear-viewports="handleClearViewports" />
 
       <!-- 图像显示区 -->
-      <div 
-        ref="dicomViewer" 
-        id="dicomViewer" 
-        :style="{ cursor: currentCursor }"
-        class="dicom-viewer"
-        :class="{ 'grid-view': isGridViewActive, 'grid-active': isGridViewActive }"
-      >
+      <div ref="dicomViewer" id="dicomViewer" :style="{ cursor: currentCursor }" class="dicom-viewer"
+        :class="{ 'grid-view': isGridViewActive, 'grid-active': isGridViewActive }">
       </div>
     </div>
 
     <!-- 网格布局选择器 -->
-    <GridLayoutSelector 
-      ref="gridLayoutSelector"
-      :show="showGridLayoutSelector"
-      @apply-layout="applyGridLayout"
-      @close="closeGridLayoutSelector"
-    />
+    <GridLayoutSelector ref="gridLayoutSelector" :show="showGridLayoutSelector" @apply-layout="applyGridLayout"
+      @close="closeGridLayoutSelector" />
 
 
     <!-- 图像详细信息对话框 -->
     <ImageInfo ref="imageInfo" />
-    
+
     <!-- 点距校准对话框 -->
-    <el-dialog
-      title="点距调整"
-      :visible.sync="calibrationDialogVisible"
-      width="360px"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      append-to-body
-    >
+    <el-dialog title="点距调整" :visible.sync="calibrationDialogVisible" width="360px" :close-on-click-modal="false"
+      :close-on-press-escape="false" append-to-body>
       <div class="calibration-dialog-body">
         <div class="calibration-row">
           <span class="label">线段长度：</span>
-          <el-input
-            class="calibration-input"
-            :value="calibrationMeasuredLength"
-            disabled
-          >
+          <el-input class="calibration-input" :value="calibrationMeasuredLength" disabled>
             <template slot="append">mm</template>
           </el-input>
         </div>
         <div class="calibration-row">
           <span class="label">真实长度：</span>
-          <el-input
-            class="calibration-input"
-            v-model="calibrationRealLength"
-            placeholder="请输入真实长度"
-          >
+          <el-input class="calibration-input" v-model="calibrationRealLength" placeholder="请输入真实长度">
             <template slot="append">mm</template>
           </el-input>
         </div>
@@ -107,15 +68,8 @@
     </el-dialog>
 
     <!-- 关于我们对话框 -->
-    <el-dialog
-      class="about-dialog"
-      title="关于 SOONDICOMER"
-      :visible.sync="aboutDialogVisible"
-      width="660px"
-      :close-on-click-modal="true"
-      :close-on-press-escape="true"
-      append-to-body
-    >
+    <el-dialog class="about-dialog" title="关于 SOONDICOMER" :visible.sync="aboutDialogVisible" width="660px"
+      :close-on-click-modal="true" :close-on-press-escape="true" append-to-body>
       <div class="about-dialog__content">
         <div class="about-dialog__header-bar">
           <div class="about-dialog__product-name">SOONDICOMER</div>
@@ -168,7 +122,7 @@
         <el-button type="primary" size="small" @click="aboutDialogVisible = false">确定</el-button>
       </span>
     </el-dialog>
-    
+
     <!-- 加载动画 -->
     <div v-if="loading || localLoading" class="loading-overlay">
       <div class="loading-content">
@@ -176,21 +130,15 @@
         <div class="loading-text">{{ loadingText }}</div>
       </div>
     </div>
-    
+
     <!-- 底部系列后台加载进度条（自定义，无动画） -->
-    <div
-      v-if="seriesProgress && seriesProgress.isActive"
-      class="series-progress-bar"
-    >
+    <div v-if="seriesProgress && seriesProgress.isActive" class="series-progress-bar">
       <div class="series-progress-text">
         正在加载系列 {{ seriesProgress.currentSeriesIndex + 1 }}/{{ totalSeriesCount }} ，
         图像 {{ seriesProgress.currentLoaded }}/{{ seriesProgress.currentTotal }}
       </div>
       <div class="custom-progress-container">
-        <div 
-          class="custom-progress-bar"
-          :style="{ width: seriesProgressPercentage + '%' }"
-        ></div>
+        <div class="custom-progress-bar" :style="{ width: seriesProgressPercentage + '%' }"></div>
       </div>
     </div>
 
@@ -260,7 +208,8 @@ export default {
     ...mapState('viewer', ['toolState']),
     ...mapGetters('dicom', ['currentImage', 'currentImageIds', 'currentSeries']),
     ...mapGetters('viewer', ['isGridViewActive', 'currentGridLayout', 'selectedGridViewport', 'isPlaying', 'isPaused', 'playbackSpeed']),
-    
+    ...mapGetters(['systemName']),
+
     // 播放状态计算
     isPausedState() {
       // 优先检查动态影像播放状态
@@ -270,7 +219,7 @@ export default {
       // 否则使用Vuex中的暂停状态
       return this.isPaused;
     },
-    
+
     // 当前播放状态
     currentPlayingState() {
       if (this.isDynamicSeries && this.cineInfo) {
@@ -279,73 +228,127 @@ export default {
       return this.isPlaying;
     },
 
-    
+
     // 鼠标样式计算
     currentCursor() {
       const path = require('path');
       const fullPath = this.getCursorPath(`mouse${this.mode}.png`);
       return `url(${fullPath}) 0 0, auto`;
     },
-    
+
     // 网格状态
     gridState() {
       return gridViewService.getGridState();
     },
-    
+
     // 播放控制台相关计算属性
     isPlaybackPlaying() {
       // 使用 Vuex 状态，播放服务状态会在播放时同步更新
       return this.isPlaying;
     },
-    
+
     isPlaybackFirst() {
       // 使用 mixin 中的方法，确保逻辑一致
       if (!this.getCurrentImageFileIndex) {
         return true;
       }
-      
+
       // 确保计算属性能响应 activeImageIndex 的变化
       const _ = this.activeImageIndex; // 建立响应式依赖
       const currentSeries = this.$store.getters['dicom/currentSeries']; // 建立响应式依赖
-      
+
       if (!currentSeries) {
         return true;
       }
-      
+
       const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
-      
+
       // 如果找不到当前图像索引或索引无效，则禁用
       if (imageFiles.length === 0 || currentImageFileIndex < 0) {
         return true;
       }
-      
+
       // 只有第一个影像（索引为0）才禁用上一张按钮
       return currentImageFileIndex === 0;
     },
-    
+
     isPlaybackLast() {
       // 使用 mixin 中的方法，确保逻辑一致
       if (!this.getCurrentImageFileIndex) {
         return true;
       }
-      
+
       // 确保计算属性能响应 activeImageIndex 的变化
       const _ = this.activeImageIndex; // 建立响应式依赖
       const currentSeries = this.$store.getters['dicom/currentSeries']; // 建立响应式依赖
-      
+
       if (!currentSeries) {
         return true;
       }
-      
+
       const { imageFiles, currentImageFileIndex } = this.getCurrentImageFileIndex();
-      
+
       // 如果找不到当前图像索引或索引无效，则禁用
       if (imageFiles.length === 0 || currentImageFileIndex < 0) {
         return true;
       }
-      
+
       // 只有最后一个影像（索引为 imageFiles.length - 1）才禁用下一张按钮
       return currentImageFileIndex >= imageFiles.length - 1;
+    },
+
+    // 帧导航相关计算属性
+    playbackFrameInfo() {
+      // 使用 mixin 中的方法获取帧信息
+      if (!this.getCurrentFrameInfo) {
+        return {
+          isMultiFrame: false,
+          currentFrame: 1,
+          totalFrames: 1,
+          isFirstFrame: true,
+          isLastFrame: true
+        };
+      }
+
+      // 建立响应式依赖
+      const _ = this.activeImageIndex;
+      const currentSeries = this.$store.getters['dicom/currentSeries'];
+      // 播放控制状态响应式依赖（currentFrame 和 totalFrames）
+      const playbackControl = this.$store.state.viewer.playbackControl;
+      const __ = playbackControl.currentFrame;
+      const ___ = playbackControl.totalFrames;
+
+      if (!currentSeries) {
+        return {
+          isMultiFrame: false,
+          currentFrame: 1,
+          totalFrames: 1,
+          isFirstFrame: true,
+          isLastFrame: true
+        };
+      }
+
+      return this.getCurrentFrameInfo();
+    },
+
+    isMultiFrame() {
+      return this.playbackFrameInfo.isMultiFrame;
+    },
+
+    currentFrame() {
+      return this.playbackFrameInfo.currentFrame;
+    },
+
+    totalFrames() {
+      return this.playbackFrameInfo.totalFrames;
+    },
+
+    isFirstFrame() {
+      return this.playbackFrameInfo.isFirstFrame;
+    },
+
+    isLastFrame() {
+      return this.playbackFrameInfo.isLastFrame;
     },
 
     // 系列后台加载进度百分比
@@ -372,7 +375,7 @@ export default {
           if (typeof this.getGridViewportElements === 'function') {
             const viewports = this.getGridViewportElements();
             viewports.forEach(viewport => {
-              const overlay = viewport.querySelector('.viewport-info-overlay');
+              const overlay = viewport.querySelector('.grid-image-info-overlay') || viewport.querySelector('.viewport-info-overlay');
               if (overlay && typeof this.updateViewportInfo === 'function') {
                 this.updateViewportInfo(overlay, viewport);
               }
@@ -443,7 +446,7 @@ export default {
 
           this.$nextTick(() => {
             if (typeof this.getGridViewportElements === 'function' &&
-                typeof this.renderImageInfoToOverlay === 'function') {
+              typeof this.renderImageInfoToOverlay === 'function') {
               const viewports = this.getGridViewportElements() || [];
               viewports.forEach(viewport => {
                 try {
@@ -469,14 +472,17 @@ export default {
     this.setupKeyboardShortcuts();
     // 等待一个微任务周期，确保Cornerstone初始化完成
     await this.$nextTick();
-    
+
     // 在自动加载前显示加载动画
     this.$store.commit('dicom/SET_LOADING', true);
     this.$store.commit('dicom/SET_LOADING_TEXT', '正在初始化应用程序...');
     this.localLoading = true;
-    
+
     // 自动加载DICOM目录
     this.autoLoadDicomDirectory();
+
+    // 验证加密狗
+    this.$store.dispatch('verifyLicense');
   },
   /**
    * 组件销毁前清理资源
@@ -484,19 +490,19 @@ export default {
   beforeDestroy() {
     try {
       // 清理所有资源
-    this.cleanupViewer();
-      
+      this.cleanupViewer();
+
       // 移除键盘事件监听
-    document.removeEventListener('keydown', this.handleKeyboardShortcuts);
+      document.removeEventListener('keydown', this.handleKeyboardShortcuts);
     } catch (error) {
       // 组件销毁清理失败，静默处理
     }
   },
   methods: {
     ...mapActions('dicom', [
-      'loadDicomDirectory', 
+      'loadDicomDirectory',
       'loadDicomFile',
-      'selectDicomSeries', 
+      'selectDicomSeries',
       'selectImage'
     ]),
     ...mapActions('viewer', [
@@ -514,7 +520,7 @@ export default {
     async initializeViewer() {
       try {
         ipcRenderer.send('maximize-window');
-        
+
         // 初始化1x1网格布局（统一使用网格视口系统）
         const layout = { rows: 1, cols: 1, totalSlots: 1 };
         await this.$store.dispatch('viewer/activateGridLayout', layout);
@@ -540,7 +546,7 @@ export default {
           gridViewService.clearGridStyles(this.$refs.dicomViewer);
           gridViewService.deactivateGridLayout();
         }
-        
+
         // 清理视口信息更新的事件监听器
         if (typeof this.getGridViewportElements === 'function') {
           const viewports = this.getGridViewportElements();
@@ -552,12 +558,12 @@ export default {
             }
           });
         }
-        
+
         // 清理Cornerstone元素
         if (this.$refs.dicomViewer) {
-        cornerstoneService.disableElement(this.$refs.dicomViewer);
+          cornerstoneService.disableElement(this.$refs.dicomViewer);
         }
-        
+
       } catch (error) {
         // 清理查看器失败，静默处理
       }
@@ -580,12 +586,12 @@ export default {
             await this.initializeGridView();
           }
         }
-        
+
         // 清空所有视口
         const viewports = typeof this.getGridViewportElements === 'function'
           ? this.getGridViewportElements()
           : [];
-        
+
         viewports.forEach(viewport => {
           try {
             // 清除信息更新定时器
@@ -593,32 +599,32 @@ export default {
               clearInterval(viewport._infoUpdateTimer);
               viewport._infoUpdateTimer = null;
             }
-            
+
             // 清除stack state
             const stackState = this.$cornerstoneTools.getToolState(viewport, 'stack');
             if (stackState && stackState.data) {
               stackState.data = [];
             }
-            
+
             // 清除系列信息标签
             const label = viewport.querySelector('.series-info-label');
             if (label) {
               label.remove();
             }
-            
+
             // 清除覆盖层
             const overlay = viewport.querySelector('.grid-image-info-overlay');
             if (overlay) {
               overlay.remove();
             }
-            
+
             // 禁用Cornerstone
             this.$cornerstone.disable(viewport);
-            
+
             // 清除dataset
             delete viewport.dataset.seriesIndex;
             delete viewport.dataset.imageIndex;
-            
+
             // 清除选中状态
             viewport.classList.remove('selected');
             viewport.style.outline = '';
@@ -692,10 +698,28 @@ export default {
     handlePlaybackSpeedChange(speed) {
       this.$store.dispatch('viewer/setPlaybackSpeed', speed);
       // 如果正在播放，更新播放速度
-      const playbackService = require('../../services/PlaybackService').playbackService;
-      if (playbackService.isPlaying() || this.isPlaybackPlaying) {
-        playbackService.setPlaybackSpeed(speed);
+      try {
+        const { playbackService } = require('../../services');
+        if (playbackService && (playbackService.isPlaying() || this.isPlaybackPlaying)) {
+          playbackService.setPlaybackSpeed(speed);
+        }
+      } catch (error) {
+        console.error('Failed to update playback speed:', error);
       }
+    },
+
+    /**
+     * 处理播放控制台上一帧
+     */
+    handlePlaybackPreviousFrame() {
+      this.previousFrame();
+    },
+
+    /**
+     * 处理播放控制台下一帧
+     */
+    handlePlaybackNextFrame() {
+      this.nextFrame();
     },
 
 
@@ -719,9 +743,9 @@ body {
   padding: 4px;
   background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
   border: 1px solid #2a2a2a;
-  
+
   // 隐藏主视图的 canvas（如果存在）
-  > canvas {
+  >canvas {
     display: none !important;
   }
 }
@@ -782,7 +806,7 @@ body {
     color: #fff;
     font-weight: bold;
   }
-  
+
   // 网格视口信息覆盖层样式
   .grid-image-info-overlay {
     position: absolute;
@@ -792,40 +816,40 @@ body {
     bottom: 0;
     pointer-events: none;
     z-index: 999;
-    
+
     .top_info {
       position: absolute;
-      
+
       .top_info_item {
         color: #fff;
         font-size: 13px;
         line-height: 20px;
       }
     }
-    
+
     .top_info1 {
       top: 0px;
       left: 4px;
     }
-    
+
     .top_info2 {
       top: 0px;
       right: 4px;
       text-align: right;
     }
-    
+
     .top_info3 {
       bottom: 15px;
       right: 4px;
       text-align: right;
     }
-    
+
     .top_x {
       position: absolute;
       left: 50%;
       bottom: 0;
       transform: translateX(-50%);
-      
+
       .top_x_lines {
         border-bottom: 1px solid #fff;
         gap: 10px;
@@ -833,18 +857,18 @@ body {
         flex-direction: row;
         align-items: flex-end;
         justify-content: center;
-        
+
         .top_x_line {
           width: 1px;
           height: 4px;
           background-color: #fff;
         }
-        
+
         .top_x_line1 {
           height: 8px;
         }
       }
-      
+
       .top_x_text {
         color: #fff;
         font-size: 13px;
@@ -852,7 +876,7 @@ body {
         text-align: center;
       }
     }
-    
+
     .top_y {
       position: absolute;
       top: 50%;
@@ -861,25 +885,25 @@ body {
       display: flex;
       flex-direction: row;
       align-items: center;
-      
+
       .top_y_lines {
         border-right: 1px solid #fff;
         gap: 10px;
         display: flex;
         flex-direction: column;
         align-items: flex-end;
-        
+
         .top_y_line {
           width: 4px;
           height: 1px;
           background-color: #fff;
         }
-        
+
         .top_y_line1 {
           width: 8px;
         }
       }
-      
+
       .top_y_text {
         color: #fff;
         font-size: 13px;
@@ -891,13 +915,16 @@ body {
 }
 
 @keyframes gridPulse {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow:
       0 0 0 1px #ff0000,
       0 0 15px rgba(255, 0, 0, 0.8),
       0 0 30px rgba(255, 0, 0, 0.5),
       inset 0 0 20px rgba(255, 0, 0, 0.15);
   }
+
   50% {
     box-shadow:
       0 0 0 2px #ff0000,
@@ -1044,7 +1071,8 @@ body {
   height: 100%;
   background-color: #67c23a;
   border-radius: 3px;
-  transition: none; /* 无过渡动画，立即更新 */
+  transition: none;
+  /* 无过渡动画，立即更新 */
 }
 
 /* 关于我们对话框样式 */
@@ -1164,8 +1192,12 @@ body {
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+  0% {
+    transform: rotate(0deg);
+  }
 
+  100% {
+    transform: rotate(360deg);
+  }
+}
 </style>

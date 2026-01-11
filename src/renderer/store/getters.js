@@ -6,5 +6,7 @@ const getters = {
   avatar: state => state.user.avatar,
   name: state => state.user.name,
   roles: state => state.user.roles,
+  isVerified: state => state.app.isVerified,
+  systemName: state => state.app.isVerified ? 'SoonWorkerDicom' : 'SoonWorkerDicom Beta'
 }
 export default getters

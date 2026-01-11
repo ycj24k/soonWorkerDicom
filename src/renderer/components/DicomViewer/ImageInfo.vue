@@ -38,7 +38,7 @@
 </template>
 
 <script>
-import { mapState } from 'vuex';
+import { mapState, mapActions } from 'vuex';
 
 export default {
   name: 'ImageInfo',
@@ -50,9 +50,10 @@ export default {
     };
   },
   computed: {
-    ...mapState('dicom', ['dicomDict', 'activeSeriesIndex'])
+    ...mapState('dicom', ['dicomDict', 'activeSeriesIndex', 'fullDicomDict'])
   },
   methods: {
+    ...mapActions('dicom', ['loadFullDicomTagsForSeries']),
     /**
      * 格式化 DICOM 日期：YYYYMMDD -> YYYY/MM/DD
      */
@@ -103,50 +104,69 @@ export default {
     },
 
     /**
-     * 显示图像信息对话框
+     * 显示图像信息对话框（按需触发完整标签解析）
      * @param {number} seriesIndex - 系列索引，可选，如果不传则使用当前活动系列
      */
-    show(seriesIndex = null) {
+    async show(seriesIndex = null) {
       try {
         // 确定要显示的系列索引
         this.currentSeriesIndex = seriesIndex !== null ? seriesIndex : this.activeSeriesIndex;
-        
-        // 从 Vuex store 获取当前系列的 DICOM 数据，并对日期/时间标签进行格式化，仅影响展示
-        if (this.dicomDict && this.dicomDict[this.currentSeriesIndex]) {
-          const seriesDict = this.dicomDict[this.currentSeriesIndex];
-          if (Array.isArray(seriesDict) && seriesDict.length > 0) {
-            const DATE_TAGS = new Set([
-              '00080020', // Study Date
-              '00080021', // Series Date
-              '00080022', // Acquisition Date
-              '00080023', // Content Date
-              '00100030'  // Patient Birth Date
-            ]);
-            const TIME_TAGS = new Set([
-              '00080030', // Study Time
-              '00080031', // Series Time
-              '00080032', // Acquisition Time
-              '00080033'  // Content Time
-            ]);
 
-            this.tableData = seriesDict.map(item => {
-              let value = item.value;
-              if (value && typeof value === 'string') {
-                if (DATE_TAGS.has(item.tag)) {
-                  value = this.formatDicomDate(value);
-                } else if (TIME_TAGS.has(item.tag)) {
-                  value = this.formatDicomTime(value);
-                }
-              }
-              return { ...item, value };
-            });
-          } else {
-            this.tableData = [];
+        // 优先按需加载完整标签（如果可用）
+        try {
+          await this.loadFullDicomTagsForSeries(this.currentSeriesIndex);
+        } catch (e) {
+          // 完整标签加载失败时不影响基础信息展示
+        }
+
+        // 选择用于展示的标签源：
+        // 1) 如果 fullDicomDict 中存在且已完整解析，优先使用完整标签
+        // 2) 否则退回到快速模式的 dicomDict（20+ 必要标签）
+        let seriesDict = null;
+        const fullDict = this.fullDicomDict && this.fullDicomDict[this.currentSeriesIndex];
+        if (fullDict && fullDict._fullyParsed) {
+          // fullDicomDict 的结构为对象，需要转换为表格可用的数组形式
+          if (Array.isArray(fullDict.tags)) {
+            seriesDict = fullDict.tags;
+          } else if (Array.isArray(fullDict)) {
+            seriesDict = fullDict;
           }
+        }
+
+        if (!seriesDict && this.dicomDict && this.dicomDict[this.currentSeriesIndex]) {
+          seriesDict = this.dicomDict[this.currentSeriesIndex];
+        }
+
+        if (Array.isArray(seriesDict) && seriesDict.length > 0) {
+          const DATE_TAGS = new Set([
+            '00080020', // Study Date
+            '00080021', // Series Date
+            '00080022', // Acquisition Date
+            '00080023', // Content Date
+            '00100030'  // Patient Birth Date
+          ]);
+          const TIME_TAGS = new Set([
+            '00080030', // Study Time
+            '00080031', // Series Time
+            '00080032', // Acquisition Time
+            '00080033'  // Content Time
+          ]);
+
+          this.tableData = seriesDict.map(item => {
+            let value = item.value;
+            if (value && typeof value === 'string') {
+              if (DATE_TAGS.has(item.tag)) {
+                value = this.formatDicomDate(value);
+              } else if (TIME_TAGS.has(item.tag)) {
+                value = this.formatDicomTime(value);
+              }
+            }
+            return { ...item, value };
+          });
         } else {
           this.tableData = [];
         }
-        
+
         this.dialogVisible = true;
       } catch (error) {
         if (process.env.NODE_ENV === 'development') {

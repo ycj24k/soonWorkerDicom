@@ -38,40 +38,44 @@
       "!test{,s}/**/*",
       "!*.md"
     ],
-    "extraFiles": [
+    "extraResources": [
+      {
+        "from": "libs",
+        "to": "./libs"
+      },
       {
         "from": "cardsoon.com",
         "to": "./cardsoon.com"
       }
     ],
     "linux": {
-          "maintainer": "Jerry Xu <jerry79.xu@gmail.com>",
-          "category": "Utility",
-          "target": [
-            {
-              "target": "AppImage",
+      "maintainer": "Jerry Xu <jerry79.xu@gmail.com>",
+      "category": "Utility",
+      "target": [
+        {
+          "target": "AppImage",
           "arch": [
             "x64",
             "arm64"
           ]
-            },
-            {
-              "target": "deb",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-            },
-            {
-              "target": "rpm",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-            }
-          ],
-          "icon": "public/images/favicon.svg"
         },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "public/images/favicon.svg"
+    },
     "copyright": "Copyright@2023 cardsoon.com",
     "directories": {
       "output": "build"
@@ -91,6 +95,7 @@
     "element-ui": "^2.15.14",
     "hammerjs": "^2.0.8",
     "js-cookie": "^3.0.5",
+    "koffi": "^2.14.1",
     "localforage": "^1.10.0",
     "nprogress": "^0.2.0",
     "vue": "^2.5.16",
