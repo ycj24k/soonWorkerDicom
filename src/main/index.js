@@ -118,7 +118,7 @@ ipcMain.handle('verify-license', async () => {
   console.warn('[Main] ⚠️  DLL Verification DISABLED - Running in Beta Mode');
   console.warn('[Main] To enable: Replace Debug DLLs with Release versions and remove the early return');
 
-  // EARLY RETURN: Comment out this block to re-enable verification
+  // EARLY RETURN REMOVED: Verification Enabled for new Release DLLs
   return {
     verified: false,
     systemName: 'SoonWorkerDicom Beta',
@@ -127,7 +127,7 @@ ipcMain.handle('verify-license', async () => {
   };
   // END EARLY RETURN
 
-  // Original verification code below (will not execute due to early return above)
+  // Original verification code below
   let dllPath = '';
   try {
     const cwd = process.cwd();
@@ -184,8 +184,12 @@ ipcMain.handle('verify-license', async () => {
 
     console.log('[Main] debug: defining getCheckInfo...');
     // Windows DLLs typically use __stdcall calling convention
-    const getCheckInfo = lib.func('int __stdcall getCheckInfo(const char *letter_char, char *info_str, int info_size)');
+    // Update for new signature: getCheckInfo(const char* letter, const char* auth_code, char* info_str, int info_size)
+    const getCheckInfo = lib.func('int __stdcall getCheckInfo(const char *letter_char, const char *authorization_code, _Out_ char *info_str, int info_size)');
     console.log('[Main] debug: function defined. Preparing to call...');
+
+    // Authorization Code - TODO: Replace with actual code if provided by vendor
+    const authCode = ""; // Empty string for now
 
     // Skip A: and B: (legacy floppy drives that don't exist on modern systems)
     // Start from C: to avoid potential crashes on non-existent drives
@@ -198,9 +202,11 @@ ipcMain.handle('verify-license', async () => {
     for (const drive of drives) {
       try {
         console.log(`[Main] debug: checking drive ${drive}...`);
-        const result = getCheckInfo(drive, infoBuffer, bufferSize);
-        console.log(`[Main] debug: drive ${drive} returned: ${result}`);
-        if (result === 0) {
+        // const ret = getCheckInfo(drive, infoBuffer, bufferSize);
+        // Updated call with authCode
+        const ret = getCheckInfo(drive, authCode, infoBuffer, bufferSize);
+        console.log(`[Main] debug: drive ${drive} returned: ${ret}`);
+        if (ret === 0) {
           let nullIndex = infoBuffer.indexOf(0);
           if (nullIndex === -1) nullIndex = infoBuffer.length;
           const infoStr = infoBuffer.toString('utf8', 0, nullIndex);
